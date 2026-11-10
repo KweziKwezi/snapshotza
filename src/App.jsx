@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { AppProvider, useApp } from './store.jsx'
+import { Icon } from './ui.jsx'
 import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
-import { Account, Auth } from './screens/Auth.jsx'
+import { Account, Auth, homeFor } from './screens/Auth.jsx'
 import { OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
 
 const SCREENS = {
@@ -42,9 +44,26 @@ const MENU = [
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.
 const SHOW_PREVIEW = import.meta.env.DEV || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('preview'))
 
+// Shown for a moment while we find out whether someone is already signed in (and while we hand them onward).
+function Booting() {
+  return (
+    <div className="flex h-full items-center justify-center bg-ink text-brand">
+      <Icon.Bolt size={64} sw={1.6} />
+    </div>
+  )
+}
+
 function Shell() {
-  const { screen, jump } = useApp()
-  const Current = SCREENS[screen]
+  const { screen, jump, auth } = useApp()
+
+  // The app always starts on the welcome screen (page load, refresh, or the link in a confirmation email).
+  // A signed-in person should never be left there: send them to their own home instead.
+  const signedInOnSplash = screen === 'splash' && auth.status === 'in'
+  useEffect(() => {
+    if (signedInOnSplash) jump(homeFor(auth))
+  }, [signedInOnSplash, auth, jump])
+
+  const Current = auth.status === 'loading' || signedInOnSplash ? Booting : SCREENS[screen]
 
   if (!SHOW_PREVIEW) {
     // Real app: full screen on phones, a centered mobile-width column on larger screens.

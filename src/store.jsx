@@ -73,7 +73,7 @@ export function AppProvider({ children, start = 'splash' }) {
   const signOut = useCallback(async () => {
     await apiSignOut()
     setAuth(signedOut)
-    setStack(['home'])
+    setStack(['splash'])
   }, [])
 
   const value = useMemo(

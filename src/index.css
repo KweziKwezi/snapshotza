@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+  --color-ink: #0b0b0b;
+  --color-brand: #ffd60a;
+  --color-surface: #f4f5f7;
+  --color-line: #e8e9ec;
+  --color-info: #eaf3ff;
+  --color-link: #1f6fe0;
+  --color-ok: #16a34a;
+  --color-cream: #fffbe6;
+}
+
+html, body, #root { height: 100%; }
+body { margin: 0; font-family: var(--font-sans); color: var(--color-ink); background: #e9eaee; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+input, select { font-family: inherit; }
+.scroll-hide { scrollbar-width: none; }
+.scroll-hide::-webkit-scrollbar { display: none; }

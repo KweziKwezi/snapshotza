@@ -1,0 +1,18 @@
+{
+  // Cloudflare Workers (static assets) deployment for the SnapshotZA PWA.
+  // The name MUST match the Worker name shown in the Cloudflare dashboard.
+  "name": "snapshotza",
+  "compatibility_date": "2026-11-09",
+
+  // The built Vite app. Unknown paths fall back to index.html (single-page app).
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Runtime variables. The app is static, so there are none.
+  // NOTE: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are *build* variables (Vite bakes them into the bundle
+  // while building). Set them in Cloudflare -> your Worker -> Settings -> Build -> Variables and secrets,
+  // NOT under runtime "Variables and Secrets".
+  "vars": {}
+}

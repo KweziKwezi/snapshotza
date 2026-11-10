@@ -4,3 +4,5 @@ dist
 .dbtest.log
 .env
 .env.local
+.wrangler
+.wrangler-home

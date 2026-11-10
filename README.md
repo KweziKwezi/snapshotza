@@ -54,7 +54,7 @@ Verification is now step 5 of 5.
 npm run test:db
 ```
 Loads migrations 1-3 into an in-process Postgres (PGlite) with a stub of Supabase's `auth` schema and roles, then
-runs the full lifecycle as different users (148 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
+runs the full lifecycle as different users (211 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
 tiers, the review window, auto-promotion, all cancellation cases, disputes, and that each role can only see and do what it should.
 Migration 4 (storage, pg_cron) needs real Supabase and is **not** covered by this test.
 
@@ -88,3 +88,12 @@ Direct table reads (RLS-protected) plus RPC for anything that changes state:
 - **Verification-docs purge:** rows carry `delete_after`; an Edge Function must delete the storage objects, then the rows.
 - **Push/email/WhatsApp notifications**, admin web panel, rate limiting on OTP.
 - **Encrypt `payout_accounts.account_number`** with Supabase Vault / pgsodium before launch. It is protected by RLS and revoked from `anon`, but not yet encrypted at column level.
+
+## Photographer onboarding & admin review (live)
+Signed-in photographers now save to Supabase at every step: profile and photo, portfolio (resized in the browser, stored in the public
+`portfolio` bucket), packages, bank details, and ID documents (private `verification-docs` bucket). Submitting sets the account to
+`pending_verification`; the photographer sees "under review" until an admin approves. Admins review everything (including signed links
+to the private ID photos) in the app under Account -> Review photographers.
+
+Run these in the Supabase SQL Editor, in order, after the first four migrations:
+`20261110000005_portfolio_storage.sql` (photo buckets and rules), then `20261110000006_fix_public_read_policies.sql`.

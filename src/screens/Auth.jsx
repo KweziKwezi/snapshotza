@@ -106,7 +106,7 @@ export function Auth() {
 
 /* ---------- Account (client profile tab / admin landing) ---------- */
 export function Account() {
-  const { auth, signOut, jump } = useApp()
+  const { auth, signOut, jump, go } = useApp()
   const p = auth.profile
   return (
     <Screen nav={<AppNav active="profile" />}>
@@ -118,9 +118,10 @@ export function Account() {
           <span className="mt-2 inline-block rounded-md bg-white px-2 py-0.5 text-[11px] font-semibold capitalize">{p?.role || 'client'}</span>
         </div>
         {p?.role === 'admin' && (
-          <Notice className="mt-4" icon={<Icon.Shield size={18} />} title="Admin account">The admin panel (verification and disputes) is coming next.</Notice>
+          <Notice className="mt-4" icon={<Icon.Shield size={18} />} title="Admin account">Review new photographers before they can take bookings.</Notice>
         )}
         <div className="mt-5 space-y-3">
+          {p?.role === 'admin' && <Button onClick={() => go('adminList')}>Review photographers</Button>}
           <Button variant="soft" onClick={() => jump('home')}>Browse photographers</Button>
           <Button variant="soft" arrow={false} onClick={signOut}>Sign out</Button>
         </div>

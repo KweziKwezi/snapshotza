@@ -1,6 +1,8 @@
 export const money = (n) => 'R' + Number(n).toLocaleString('en-US')
 
-export const CATEGORIES = ['All', 'Matric', 'Wedding', 'Corporate', 'Events']
+// What a photographer can specialise in (stored as photographer_profiles.specialties).
+export const SPECIALTIES = ['Matric', 'Wedding', 'Corporate', 'Events', 'Newborn', 'Real estate']
+export const CATEGORIES = ['All', ...SPECIALTIES]
 
 export const PHOTOGRAPHERS = [
   { id: 'thabo', name: 'Thabo Mokoena', style: 'Wedding', tagline: 'Wedding & lifestyle photographer', rating: 4.9, reviews: 128, from: 2500, city: 'Cape Town', tone: 'warm', cover: '/photos/wedding-1.jpg', avatar: '/photos/thabo.jpg', bio: 'Honest emotions. Beautiful light. I turn your once-in-a-lifetime moments into forever.' },

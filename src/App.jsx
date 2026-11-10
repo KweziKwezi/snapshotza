@@ -5,12 +5,15 @@ import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
+import { AdminList, AdminReview } from './screens/Admin.jsx'
 import { OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
 
 const SCREENS = {
   splash: Splash,
   auth: Auth,
   account: Account,
+  adminList: AdminList,
+  adminReview: AdminReview,
   home: Home,
   profile: Profile,
   date: ChooseDate,
@@ -39,6 +42,7 @@ const MENU = [
     ['studio', 'Studio dashboard'], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
+  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true]]],
 ]
 
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.

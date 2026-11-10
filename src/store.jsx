@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, supabaseConfigured } from './lib/supabase.js'
 import { loadAccount, signOut as apiSignOut } from './lib/auth.js'
+import { loadStudio, studioState } from './lib/studio.js'
 
 const Ctx = createContext(null)
 export const useApp = () => useContext(Ctx)
@@ -21,7 +22,7 @@ const initial = {
   studio: {
     name: 'Thabo Mokoena',
     city: 'Cape Town, Western Cape',
-    specialty: 'Wedding & lifestyle',
+    specialties: ['Wedding'],
     bio: 'Honest emotions. Beautiful light.\nLet’s turn your moments into forever.',
   },
   portfolio: [
@@ -38,7 +39,10 @@ const initial = {
   completedBookings: 3,
   rating: 4.9,
   bank: null, // { bank, holder, account, type, branch }
-  verification: 'verified', // 'verified' | 'pending'
+  docs: {}, // real accounts only: { sa_id_front: { path }, ... }
+  termsAccepted: false,
+  verification: 'verified', // demo dashboard only
+  adminPid: null, // photographer being reviewed (admin)
 }
 
 // status: 'loading' | 'out' | 'in'.  When Supabase is not configured the app stays in demo mode ('out').
@@ -54,9 +58,19 @@ export function AppProvider({ children, start = 'splash' }) {
   const back = useCallback(() => setStack((st) => (st.length > 1 ? st.slice(0, -1) : st)), [])
   const jump = useCallback((screen) => setStack([screen]), [])
 
-  const refreshAccount = useCallback(async (user) => {
-    if (!user) return setAuth(signedOut)
+  // Studio data is loaded once per signed-in user, so a background token refresh never overwrites what someone is typing.
+  const hydratedFor = useRef(null)
+  const refreshAccount = useCallback(async (user, { force = false } = {}) => {
+    if (!user) {
+      hydratedFor.current = null
+      return setAuth(signedOut)
+    }
     const res = await loadAccount(user.id)
+    if (res.profile?.role === 'photographer' && res.photographer && (force || hydratedFor.current !== user.id)) {
+      const data = await loadStudio(res.photographer.id)
+      setState((s) => ({ ...s, ...studioState(res.profile, res.photographer, data) }))
+      hydratedFor.current = user.id
+    }
     setAuth({ status: 'in', user, profile: res.profile || null, photographer: res.photographer || null })
   }, [])
 
@@ -72,6 +86,8 @@ export function AppProvider({ children, start = 'splash' }) {
 
   const signOut = useCallback(async () => {
     await apiSignOut()
+    hydratedFor.current = null
+    setState(initial)            // forget the previous person's data
     setAuth(signedOut)
     setStack(['splash'])
   }, [])

@@ -24,8 +24,8 @@ await db.exec(`
   alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
   alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
 `)
-// 0004 needs Supabase's storage schema + pg_cron, so only 0001-0003 run here.
-for (const f of fs.readdirSync(dir).sort().filter((f) => !f.includes('storage_and_cron'))) {
+// 0004 and 0005 need Supabase's real storage schema (and pg_cron), so only the database migrations run here.
+for (const f of fs.readdirSync(dir).sort().filter((f) => !/storage/.test(f))) {
   await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
 }
 
@@ -404,6 +404,99 @@ await raises('clients cannot insert payouts', as(user(c1), `insert into payouts 
 eq('client fee update affects no rows', (await as(user(c1), `update platform_settings set platform_fee_rate=0`)).affectedRows, 0)
 await as(user(adminId), `update platform_settings set review_window_hours=48`)
 eq('fee settings unchanged', (await su(`select platform_fee_rate::text r from platform_settings`)).rows[0].r, '0.0500')
+
+console.log('\n# Onboarding writes exactly as the app sends them, then admin review')
+const p2 = await mkUser('lerato@test.za', 'photographer', 'Lerato Nkosi')
+const pid2 = (await su(`select id from photographer_profiles where user_id=$1`, [p2])).rows[0].id
+const asP2 = (sql, params = []) => as(user(p2), sql, params)
+
+// step 1: profile
+await asP2(`update profiles set full_name=$1 where id=$2`, ['Lerato Nkosi', p2])
+await asP2(`update photographer_profiles set location=$1, specialties=$2, bio=$3 where id=$4`, ['Johannesburg', ['Matric', 'Events'], 'Bold colour, confident frames.', pid2])
+await asP2(`update profiles set profile_photo_url=$1 where id=$2`, ['https://x.test/avatar.jpg', p2])
+// step 2: portfolio (cover + order), then remove and reorder
+const ph = []
+for (let i = 0; i < 6; i++) {
+  ph.push((await asP2(`insert into photos (photographer_id,url,thumbnail_url,storage_path,is_portfolio,is_cover,upload_order)
+                       values ($1,$2,$3,$4,true,$5,$6) returning id`, [pid2, `https://x.test/${i}.jpg`, `https://x.test/${i}-t.jpg`, `${p2}/${i}.jpg`, i === 0, i])).rows[0].id)
+}
+await asP2(`delete from photos where id=$1`, [ph[5]])
+await asP2(`update photos set upload_order=0, is_cover=true where id=$1`, [ph[1]])
+await asP2(`update photos set upload_order=1, is_cover=false where id=$1`, [ph[0]])
+eq('portfolio saved', (await asP2(`select count(*)::int n from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows[0].n, 5)
+eq('cover is the first photo after reordering', (await asP2(`select id from photos where photographer_id=$1 and is_cover`, [pid2])).rows[0].id, ph[1])
+await raises('cannot remove another photographer\'s photo', as(user(p1), `delete from photos where id=$1`, [ph[0]]).then((r) => { if (!r.affectedRows) throw new Error('row-level security: 0 rows') }), /row-level security/)
+// step 3: packages (insert, then update by id like the app does on a second save)
+const pk2 = []
+for (const [n, price, h, c, d, i] of [['Essential', 1200, 2, 40, 7, 0], ['Signature', 2400, 4, 100, 7, 1], ['Full story', 4000, 8, 250, 10, 2]]) {
+  pk2.push((await asP2(`insert into packages (photographer_id,name,price_zar,duration_hours,num_photos,delivery_days,is_popular,is_active,sort_order,includes)
+                        values ($1,$2,$3,$4,$5,$6,$7,true,$8,$9) returning id`, [pid2, n, price, h, c, d, i === 1, i, ['Edited photos', 'Private online gallery']])).rows[0].id)
+}
+await asP2(`update packages set price_zar=2500 where id=$1`, [pk2[1]])
+await raises('a package needs a positive price', asP2(`insert into packages (photographer_id,name,price_zar,duration_hours,num_photos,delivery_days) values ($1,'Bad',0,2,10,7)`, [pid2]), /check/)
+// step 4: bank — upsert twice (second time changes the number)
+const upsertBank = (acc) => asP2(`insert into payout_accounts (photographer_id,bank_name,account_holder,account_number,account_type,branch_code)
+                                  values ($1,'Capitec','Lerato Nkosi',$2,'savings','470010')
+                                  on conflict (photographer_id) do update set bank_name=excluded.bank_name, account_holder=excluded.account_holder,
+                                  account_number=excluded.account_number, account_type=excluded.account_type, branch_code=excluded.branch_code`, [pid2, acc])
+await upsertBank('1234567890')
+await upsertBank('1234567891')
+eq('bank upsert keeps one row', (await su(`select count(*)::int n from payout_accounts where photographer_id=$1`, [pid2])).rows[0].n, 1)
+eq('bank upsert saved the latest number', (await su(`select account_number n from payout_accounts where photographer_id=$1`, [pid2])).rows[0].n, '1234567891')
+// step 5: documents — upload each, then replace one (new path), like re-taking a photo
+const upsertDoc = (t, path) => asP2(`insert into verification_documents (photographer_id,doc_type,storage_path) values ($1,$2,$3)
+                                     on conflict (photographer_id,doc_type) do update set storage_path=excluded.storage_path`, [pid2, t, path])
+await raises('cannot submit before everything is in', asP2(`select * from submit_for_verification()`), /upload your ID/)
+for (const t of ['sa_id_front', 'sa_id_back', 'selfie']) await upsertDoc(t, `${p2}/${t}-1.jpg`)
+await upsertDoc('selfie', `${p2}/selfie-2.jpg`)
+eq('replacing a document keeps one row per type', (await su(`select count(*)::int n from verification_documents where photographer_id=$1`, [pid2])).rows[0].n, 3)
+eq('replacement points at the new file', (await su(`select storage_path p from verification_documents where photographer_id=$1 and doc_type='selfie'`, [pid2])).rows[0].p, `${p2}/selfie-2.jpg`)
+await raises('terms must be accepted to submit', asP2(`select * from submit_for_verification()`), /accept the terms/)
+await asP2(`update photographer_profiles set terms_accepted_at=$1 where id=$2`, [new Date().toISOString(), pid2])
+await asP2(`select * from submit_for_verification()`)
+eq('submitted for review', (await su(`select verification_status s from photographer_profiles where id=$1`, [pid2])).rows[0].s, 'pending_verification')
+await raises('cannot submit twice', asP2(`select * from submit_for_verification()`), /already submitted/)
+
+console.log('\n# What each person can see of a pending application')
+eq('pending photographer is not in public search', (await as(anon, `select count(*)::int n from public_photographers where id=$1`, [pid2])).rows[0].n, 0)
+eq('anon cannot see a pending portfolio', (await as(anon, `select * from photos where photographer_id=$1`, [pid2])).rows.length, 0)
+eq('anon cannot see pending packages', (await as(anon, `select * from packages where photographer_id=$1`, [pid2])).rows.length, 0)
+eq('another photographer cannot see their bank', (await as(user(p1), `select * from payout_accounts where photographer_id=$1`, [pid2])).rows.length, 0)
+eq('another photographer cannot see their ID documents', (await as(user(p1), `select * from verification_documents where photographer_id=$1`, [pid2])).rows.length, 0)
+eq('another photographer cannot see their packages', (await as(user(p1), `select * from packages where photographer_id=$1`, [pid2])).rows.length, 0)
+eq('a client cannot see their bank', (await as(user(c1), `select * from payout_accounts where photographer_id=$1`, [pid2])).rows.length, 0)
+const queue = (await as(user(adminId), `select pp.id, pr.full_name, pr.email from photographer_profiles pp join profiles pr on pr.id=pp.user_id where pp.verification_status='pending_verification'`)).rows
+eq('admin review queue lists the applicant with name and email', queue.map((r) => `${r.full_name}|${r.email}`).join(','), 'Lerato Nkosi|lerato@test.za')
+eq('admin can read the bank details', (await as(user(adminId), `select account_holder from payout_accounts where photographer_id=$1`, [pid2])).rows[0].account_holder, 'Lerato Nkosi')
+eq('admin can read all 3 ID documents', (await as(user(adminId), `select * from verification_documents where photographer_id=$1`, [pid2])).rows.length, 3)
+eq('admin can read the portfolio', (await as(user(adminId), `select * from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows.length, 5)
+eq('admin can read the packages', (await as(user(adminId), `select * from packages where photographer_id=$1`, [pid2])).rows.length, 3)
+
+console.log('\n# Reject, fix, resubmit, approve')
+await raises('a photographer cannot approve themselves', asP2(`select * from admin_review_photographer($1,true,'')`, [pid2]), /admins only/)
+await as(user(adminId), `select * from admin_review_photographer($1,false,'ID photo is blurry, please retake')`, [pid2])
+const rej = (await asP2(`select verification_status s, verification_note n from photographer_profiles where id=$1`, [pid2])).rows[0]
+eq('rejected', rej.s, 'rejected')
+eq('photographer can read the reason', rej.n, 'ID photo is blurry, please retake')
+await upsertDoc('sa_id_front', `${p2}/sa_id_front-2.jpg`)
+await asP2(`select * from submit_for_verification()`)
+const resub = (await su(`select verification_status s, verification_note n from photographer_profiles where id=$1`, [pid2])).rows[0]
+eq('resubmitted after fixing', resub.s, 'pending_verification')
+eq('old rejection note is cleared', resub.n, null)
+await as(user(adminId), `select * from admin_review_photographer($1,true,'')`, [pid2])
+const ok2 = (await su(`select verification_status s, id_verified i, bank_verified b from photographer_profiles where id=$1`, [pid2])).rows[0]
+eq('approved', ok2.s, 'approved')
+eq('ID and bank flagged verified', `${ok2.i}/${ok2.b}`, 'true/true')
+eq('ID documents scheduled for deletion', (await su(`select count(*)::int n from verification_documents where photographer_id=$1 and delete_after is not null`, [pid2])).rows[0].n, 3)
+const live2 = (await as(anon, `select full_name, from_price, cover_url, specialties from public_photographers where id=$1`, [pid2])).rows[0]
+eq('approved photographer appears in public search', live2.full_name, 'Lerato Nkosi')
+eq('public listing shows the cheapest package', live2.from_price, '1200.00')
+eq('public listing shows the cover photo', live2.cover_url, 'https://x.test/1.jpg')
+eq('public listing shows specialties', live2.specialties.join(','), 'Matric,Events')
+eq('anon can now see the portfolio', (await as(anon, `select * from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows.length, 5)
+eq('anon can now see the packages', (await as(anon, `select * from packages where photographer_id=$1`, [pid2])).rows.length, 3)
+eq('a signed-in client can see the portfolio and packages too', `${(await as(user(c2), `select * from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows.length}/${(await as(user(c2), `select * from packages where photographer_id=$1`, [pid2])).rows.length}`, '5/3')
+eq('bank details stay private after approval', (await as(anon, `select count(*)::int n from public_photographers`)).rows[0].n, 1)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

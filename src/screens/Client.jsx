@@ -56,9 +56,9 @@ export function Splash() {
         </div>
       }
     >
-      <div className="px-5 pt-2">
-        <Photo src="/photos/wedding-1.jpg" tone="green" className="h-[380px] rounded-[28px]" />
-        <div className="relative -mt-[50px] flex justify-center">
+      <div className="flex min-h-full flex-col px-5 pt-2">
+        <Photo src="/photos/wedding-1.jpg" tone="green" className="min-h-[140px] max-h-[400px] flex-1 rounded-[28px]" />
+        <div className="relative -mt-[50px] flex shrink-0 justify-center">
           <div className="flex h-[100px] w-[100px] items-center justify-center rounded-3xl bg-brand text-ink shadow-lg">
             <Icon.Bolt size={64} sw={1.6} />
           </div>

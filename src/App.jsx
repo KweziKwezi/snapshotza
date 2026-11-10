@@ -39,9 +39,24 @@ const MENU = [
   ]],
 ]
 
+// The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.
+const SHOW_PREVIEW = import.meta.env.DEV || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('preview'))
+
 function Shell() {
   const { screen, jump } = useApp()
   const Current = SCREENS[screen]
+
+  if (!SHOW_PREVIEW) {
+    // Real app: full screen on phones, a centered mobile-width column on larger screens.
+    return (
+      <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-white md:shadow-[0_0_40px_rgba(0,0,0,0.12)]">
+        <div className="min-h-0 flex-1" key={screen}>
+          <Current />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-full items-center justify-center gap-10 md:p-6">
       <aside className="hidden w-64 shrink-0 lg:block">

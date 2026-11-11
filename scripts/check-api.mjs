@@ -3,7 +3,7 @@
 // Permission-denied / empty results are expected for an anonymous visitor and count as fine.
 //   npm run check:api
 import fs from 'node:fs'
-import { APP_SELECTS } from '../src/lib/queries.js'
+import { APP_RPCS, APP_SELECTS } from '../src/lib/queries.js'
 
 const env = { ...process.env }
 if (fs.existsSync('.env')) {
@@ -26,6 +26,14 @@ for (const [table, select] of APP_SELECTS) {
   const code = body && !Array.isArray(body) ? body.code : null
   const fine = res.ok || code === '42501'            // 42501 = permission denied (private table, as designed)
   console.log(`${fine ? 'ok  ' : 'FAIL'} ${table.padEnd(24)} ${select.length > 60 ? select.slice(0, 57) + '...' : select}${fine ? '' : `\n     -> HTTP ${res.status} ${code || ''} ${body?.message || ''}`}`)
+  if (!fine) bad++
+}
+for (const [fn, args] of APP_RPCS) {
+  const res = await fetch(`${url}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify(args) })
+  const body = await res.json().catch(() => null)
+  const code = body && !Array.isArray(body) ? body.code : null
+  const fine = res.ok || code === '42501'
+  console.log(`${fine ? 'ok  ' : 'FAIL'} rpc ${fn.padEnd(20)} ${Object.keys(args).join(', ')}${fine ? '' : `\n     -> HTTP ${res.status} ${code || ''} ${body?.message || ''}`}`)
   if (!fine) bad++
 }
 console.log(bad ? `\n${bad} query shape(s) are broken.` : '\nAll query shapes are accepted by the API.')

@@ -1,16 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store.jsx'
 import { supabaseConfigured } from '../lib/supabase.js'
+import * as market from '../lib/market.js'
+import { explain } from '../lib/studio.js'
 import {
-  Avatar, BottomNav, Button, Checkbox, H1, Icon, Notice, Photo, Screen, Stepper, TopBar,
+  Avatar, BottomNav, Button, Checkbox, H1, Icon, Notice, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
 import {
   CATEGORIES, DAYS_SHORT, GALLERY_RETENTION_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, TIMES, isAvailable, money, packagesFor,
 } from '../data.js'
 
 /* ---------- helpers ---------- */
+const EMPTY_PKG = { id: '', name: '', price: 0, hours: 0, photos: 0, delivery: 0 }
 export function usePhotographer() {
   const { state } = useApp()
+  if (supabaseConfigured) {
+    // Real marketplace: the photographer and packages loaded from the database when their profile was opened.
+    const sel = state.selected
+    if (!sel) return { p: { id: '', name: '', tone: 'warm', city: '', tagline: '', bio: '', rating: 0, reviews: 0 }, packages: [], pkg: EMPTY_PKG }
+    const pkg = sel.packages.find((x) => x.id === state.packageId) || sel.packages.find((x) => x.popular) || sel.packages[0] || EMPTY_PKG
+    return { p: sel.p, packages: sel.packages, pkg }
+  }
   const p = PHOTOGRAPHERS.find((x) => x.id === state.photographerId) || PHOTOGRAPHERS[0]
   const packages = packagesFor(p)
   const pkg = packages.find((x) => x.id === state.packageId) || packages[1]
@@ -76,20 +86,53 @@ export function Splash() {
 
 /* ---------- 2. Home ---------- */
 export function Home() {
-  const { go, set, state } = useApp()
+  const { go, set, state, auth } = useApp()
+  const live = supabaseConfigured
   const [cat, setCat] = useState('All')
   const [q, setQ] = useState('')
-  const list = useMemo(
-    () =>
-      PHOTOGRAPHERS.filter(
-        (p) =>
-          (cat === 'All' || p.style === cat) &&
-          `${p.name} ${p.city} ${p.style}`.toLowerCase().includes(q.trim().toLowerCase()),
-      ),
-    [cat, q],
-  )
-  const toggleFav = (id) =>
-    set((s) => ({ favs: s.favs.includes(id) ? s.favs.filter((f) => f !== id) : [...s.favs, id] }))
+  const [items, setItems] = useState(live ? null : PHOTOGRAPHERS)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!live) return undefined
+    let off = false
+    market.listPhotographers()
+      .then((d) => { if (!off) setItems(d) })
+      .catch((e) => { if (!off) { setError(explain(e)); setItems([]) } })
+    return () => { off = true }
+  }, [live])
+
+  // Saved photographers follow the signed-in person.
+  const signedIn = auth.status === 'in'
+  useEffect(() => {
+    if (!live || !signedIn) return
+    market.loadFavorites().then((ids) => set({ favs: ids })).catch(() => {})
+  }, [live, signedIn, set])
+
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return (items || []).filter((p) => {
+      const tags = p.specialties || [p.style]
+      return (cat === 'All' || tags.includes(cat)) && `${p.name} ${p.city} ${tags.join(' ')}`.toLowerCase().includes(needle)
+    })
+  }, [items, cat, q])
+
+  const toggleFav = async (id) => {
+    if (live && !signedIn) { set({ afterAuth: 'home' }); return go('auth') }
+    const on = !state.favs.includes(id)
+    set((s) => ({ favs: on ? [...s.favs, id] : s.favs.filter((f) => f !== id) }))
+    if (!live) return
+    try {
+      await market.setFavorite(auth.user.id, id, on)
+    } catch {
+      set((s) => ({ favs: on ? s.favs.filter((f) => f !== id) : [...s.favs, id] }))   // undo
+    }
+  }
+  const open = (p) => {
+    set({ photographerId: p.id, packageId: live ? null : 'signature', selected: null, date: live ? null : state.date })
+    go('profile')
+  }
+
   return (
     <Screen nav={<AppNav active="home" />}>
       <div className="px-5 pt-2">
@@ -97,7 +140,7 @@ export function Home() {
           <div>
             <div className="font-display text-[11px] font-bold tracking-wider">SNAPSHOTZA</div>
             <div className="mt-1.5 flex items-center gap-1 text-[12px] text-neutral-600">
-              <Icon.Pin size={14} /> Cape Town, Western Cape
+              <Icon.Pin size={14} /> South Africa
             </div>
           </div>
           <button aria-label="Notifications" className="mt-1"><Icon.Bell size={22} /></button>
@@ -140,19 +183,24 @@ export function Home() {
           <button className="text-[13px] font-semibold text-link" onClick={() => { setCat('All'); setQ('') }}>View all</button>
         </div>
 
-        {list.length === 0 && <p className="py-10 text-center text-sm text-neutral-500">No photographers match that yet.</p>}
+        {error && <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="py-10 text-center text-sm text-neutral-500">Finding photographers…</p>}
+        {items && items.length === 0 && !error && (
+          <p className="py-10 text-center text-sm text-neutral-500">No photographers have joined yet. Check back soon.</p>
+        )}
+        {items && items.length > 0 && list.length === 0 && <p className="py-10 text-center text-sm text-neutral-500">No photographers match that yet.</p>}
         <div className="grid grid-cols-2 gap-3 pb-5">
           {list.map((p) => (
             <div key={p.id} className="relative rounded-2xl bg-white shadow-[0_1px_8px_rgba(0,0,0,0.08)]">
-              <button className="block w-full text-left" onClick={() => { set({ photographerId: p.id, packageId: 'signature' }); go('profile') }}>
-                <Photo src={p.cover} tone={p.tone} className="h-[150px] rounded-t-2xl" />
+              <button className="block w-full text-left" onClick={() => open(p)}>
+                <Photo src={p.cover} tone={p.tone} label={p.cover ? undefined : initials(p.name)} className="h-[150px] rounded-t-2xl" />
                 <div className="p-3">
                   <div className="flex items-center justify-between">
                     <span className="truncate text-[13px] font-semibold">{p.name}</span>
                     <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-500 text-white"><Icon.Check size={10} /></span>
                   </div>
                   <div className="mt-0.5 flex items-center gap-1 text-[11px] text-neutral-500">
-                    {p.style} · <Icon.Star size={11} className="text-neutral-500" /> {p.rating}
+                    {p.style} · {p.rating > 0 ? <><Icon.Star size={11} className="text-neutral-500" /> {Number(p.rating).toFixed(1)}</> : 'New'}
                   </div>
                   <div className="mt-1.5 text-[13px] font-semibold">From {money(p.from)}</div>
                 </div>
@@ -174,31 +222,64 @@ export function Home() {
 
 /* ---------- 3. Photographer profile ---------- */
 export function Profile() {
-  const { go, back, set, state } = useApp()
+  const { go, back, set, state, auth } = useApp()
+  const live = supabaseConfigured
   const { p, packages } = usePhotographer()
+  const [error, setError] = useState('')
+  const loaded = !live || state.selected?.p.id === state.photographerId
+
+  useEffect(() => {
+    if (!live || loaded) return undefined
+    let off = false
+    market.loadPhotographer(state.photographerId)
+      .then((sel) => {
+        if (off) return
+        const pick = sel.packages.find((k) => k.popular) || sel.packages[0]
+        set({ selected: sel, packageId: pick ? pick.id : null })
+      })
+      .catch((e) => { if (!off) setError(explain(e)) })
+    return () => { off = true }
+  }, [live, loaded, state.photographerId, set])
+
   const fav = state.favs.includes(p.id)
+  const toggleFav = async () => {
+    if (live && auth.status !== 'in') { set({ afterAuth: 'home' }); return go('auth') }
+    const on = !fav
+    set((s) => ({ favs: on ? [...s.favs, p.id] : s.favs.filter((f) => f !== p.id) }))
+    if (!live) return
+    try { await market.setFavorite(auth.user.id, p.id, on) } catch { set((s) => ({ favs: on ? s.favs.filter((f) => f !== p.id) : [...s.favs, p.id] })) }
+  }
+
+  if (!loaded) {
+    return (
+      <Screen>
+        <TopBar title="Photographer" onBack={back} />
+        <div className="px-5 pt-6">
+          {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p> : <p className="text-center text-sm text-neutral-500">Loading…</p>}
+        </div>
+      </Screen>
+    )
+  }
+
+  const portfolio = live ? state.selected.portfolio.slice(0, 6) : [1, 2, 3].map((n, i) => ({ id: n, src: `/photos/wedding-${n}.jpg`, tone: ['green', 'dusk', 'cream'][i] }))
+  const reviews = live ? state.selected.reviews : []
+  const canBook = packages.length > 0 && Boolean(state.packageId)
+
   return (
     <Screen
       footer={
         <>
           <div className="mb-3 flex items-center gap-2 text-[12px] text-link"><Icon.Lock size={14} /> 100% upfront. Safely held until delivery.</div>
-          <Button onClick={() => go('date')}>Check availability</Button>
+          <Button disabled={!canBook} onClick={() => go('date')}>Check availability</Button>
         </>
       }
     >
       <TopBar
         title="Photographer"
         onBack={back}
-        right={
-          <button
-            aria-label="Save photographer"
-            onClick={() => set((s) => ({ favs: s.favs.includes(p.id) ? s.favs.filter((f) => f !== p.id) : [...s.favs, p.id] }))}
-          >
-            <Icon.Heart filled={fav} />
-          </button>
-        }
+        right={<button aria-label="Save photographer" onClick={toggleFav}><Icon.Heart filled={fav} /></button>}
       />
-      <Photo src={p.cover} tone={p.tone} className="h-[200px]" />
+      <Photo src={p.cover} tone={p.tone} label={p.cover ? undefined : initials(p.name)} className="h-[200px]" />
       <div className="px-5">
         <div className="-mt-8 flex items-end justify-between">
           <div className="rounded-full border-4 border-white"><Avatar person={p} size={64} /></div>
@@ -209,19 +290,25 @@ export function Profile() {
         <h1 className="mt-3 font-display text-[28px] font-extrabold tracking-tight">{p.name}</h1>
         <div className="text-[13px] text-neutral-500">{p.tagline}</div>
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] text-neutral-700">
-          <Icon.Pin size={14} /> {p.city} · <Icon.Star size={12} /> {p.rating} ({p.reviews} reviews)
+          {p.city && <><Icon.Pin size={14} /> {p.city} · </>}
+          {p.rating > 0 ? <><Icon.Star size={12} /> {Number(p.rating).toFixed(1)} ({p.reviews} reviews)</> : 'New on SnapshotZA'}
         </div>
-        <p className="mt-3 text-[13px] leading-relaxed text-neutral-600">{p.bio}</p>
+        {p.bio && <p className="mt-3 text-[13px] leading-relaxed text-neutral-600">{p.bio}</p>}
 
-        <h2 className="mb-3 mt-6 font-display text-[17px] font-bold">A little of my magic</h2>
-        <div className="grid grid-cols-3 gap-2">
-          {['/photos/wedding-1.jpg', '/photos/wedding-2.jpg', '/photos/wedding-3.jpg'].map((s, i) => (
-            <Photo key={s} src={s} tone={['green', 'dusk', 'cream'][i]} className="h-[100px] rounded-xl" />
-          ))}
-        </div>
+        {portfolio.length > 0 && (
+          <>
+            <h2 className="mb-3 mt-6 font-display text-[17px] font-bold">A little of my magic</h2>
+            <div className="grid grid-cols-3 gap-2">
+              {portfolio.map((ph, i) => (
+                <Photo key={ph.id} src={ph.src} tone={ph.tone || ['green', 'dusk', 'cream'][i % 3]} className="h-[100px] rounded-xl" />
+              ))}
+            </div>
+          </>
+        )}
 
         <h2 className="mt-6 font-display text-[17px] font-bold">Choose your package</h2>
         <p className="mb-3 text-[12px] text-neutral-500">All packages include a private online gallery.</p>
+        {packages.length === 0 && <p className="mb-4 rounded-xl bg-surface p-3 text-[13px] text-neutral-600">This photographer has not set up packages yet.</p>}
         <div className="space-y-3 pb-4">
           {packages.map((k) => {
             const on = state.packageId === k.id
@@ -247,16 +334,43 @@ export function Profile() {
             )
           })}
         </div>
+
+        {live && (
+          <>
+            <h2 className="font-display text-[17px] font-bold">Reviews</h2>
+            {reviews.length === 0 ? (
+              <p className="mb-6 mt-2 text-[13px] text-neutral-500">No reviews yet. Be the first to book and share your experience.</p>
+            ) : (
+              <div className="mb-6 mt-3 space-y-3">
+                {reviews.map((r) => (
+                  <div key={r.id} className="rounded-2xl bg-surface p-3.5">
+                    <div className="flex items-center gap-1 text-[12px] font-semibold"><Icon.Star size={12} /> {r.rating}.0 <span className="font-normal text-neutral-400">· Verified client</span></div>
+                    {r.comment && <p className="mt-1 text-[13px] text-neutral-700">{r.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </Screen>
   )
 }
 
 /* ---------- 4. Choose date ---------- */
+const todayParts = () => {
+  const t = new Date()
+  return { y: t.getFullYear(), m: t.getMonth(), d: t.getDate() }
+}
+
 export function ChooseDate() {
   const { go, back, set, state } = useApp()
+  const live = supabaseConfigured
   const { p, pkg } = usePhotographer()
-  const [view, setView] = useState({ y: state.date.y, m: state.date.m })
+  const now = useMemo(todayParts, [])
+  const [view, setView] = useState(() => (state.date ? { y: state.date.y, m: state.date.m } : live ? { y: now.y, m: now.m } : { y: 2026, m: 10 }))
+  const [avail, setAvail] = useState(null)   // live: { 'YYYY-MM-DD': isBooked }, only for days the photographer opened
+  const [loadErr, setLoadErr] = useState('')
   const first = new Date(view.y, view.m, 1).getDay()
   const days = new Date(view.y, view.m + 1, 0).getDate()
   const cells = [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)]
@@ -265,9 +379,31 @@ export function ChooseDate() {
       const d = new Date(v.y, v.m + n, 1)
       return { y: d.getFullYear(), m: d.getMonth() }
     })
+
+  useEffect(() => {
+    if (!live) return undefined
+    let off = false
+    setAvail(null)
+    setLoadErr('')
+    market.getAvailability(state.photographerId, market.ymd(view.y, view.m, 1), market.ymd(view.y, view.m, days))
+      .then((d) => { if (!off) setAvail(d) })
+      .catch((e) => { if (!off) { setLoadErr(explain(e)); setAvail({}) } })
+    return () => { off = true }
+  }, [live, state.photographerId, view.y, view.m, days])
+
+  const isPast = (d) => view.y < now.y || (view.y === now.y && (view.m < now.m || (view.m === now.m && d <= now.d)))
+  const dayOk = (d) => {
+    if (!live) return isAvailable(view.y, view.m, d)
+    const key = market.ymd(view.y, view.m, d)
+    return Boolean(avail) && avail[key] === false && !isPast(d)
+  }
+  const anyOpen = live && avail && cells.some((d) => d && dayOk(d))
   const selected = state.date
-  const hasSel = selected && isAvailable(selected.y, selected.m, selected.d)
-  const canPrev = view.y > 2026 || view.m > 10
+  const hasSel = Boolean(selected) && (live || isAvailable(selected.y, selected.m, selected.d))
+  const monthIndex = view.y * 12 + view.m
+  const canPrev = live ? monthIndex > now.y * 12 + now.m : view.y > 2026 || view.m > 10
+  const canNext = live ? monthIndex < now.y * 12 + now.m + 12 : true
+
   return (
     <Screen
       footer={
@@ -294,7 +430,7 @@ export function ChooseDate() {
           <h2 className="font-display text-[20px] font-bold">{MONTHS[view.m]} {view.y}</h2>
           <div className="flex gap-5">
             <button aria-label="Previous month" disabled={!canPrev} onClick={() => shift(-1)} className="disabled:opacity-30"><Icon.ChevronL size={18} /></button>
-            <button aria-label="Next month" onClick={() => shift(1)}><Icon.Chevron size={18} /></button>
+            <button aria-label="Next month" disabled={!canNext} onClick={() => shift(1)} className="disabled:opacity-30"><Icon.Chevron size={18} /></button>
           </div>
         </div>
 
@@ -304,8 +440,8 @@ export function ChooseDate() {
           ))}
           {cells.map((d, i) => {
             if (!d) return <div key={i} />
-            const ok = isAvailable(view.y, view.m, d)
-            const sel = ok && selected.y === view.y && selected.m === view.m && selected.d === d
+            const ok = dayOk(d)
+            const sel = ok && selected && selected.y === view.y && selected.m === view.m && selected.d === d
             return (
               <button
                 key={i}
@@ -320,6 +456,9 @@ export function ChooseDate() {
           })}
         </div>
         <div className="mt-2 flex items-center gap-2 text-[11px] text-neutral-500"><span className="h-1.5 w-1.5 rounded-full bg-ok" /> Available</div>
+        {live && avail === null && <p className="mt-3 text-[12px] text-neutral-500">Checking availability…</p>}
+        {live && avail && !anyOpen && !loadErr && <p className="mt-3 rounded-xl bg-surface p-3 text-[13px] text-neutral-600">No open dates this month. Try the next month.</p>}
+        {loadErr && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{loadErr}</p>}
 
         <h2 className="mb-3 mt-6 font-display text-[17px] font-bold">Start time</h2>
         <div className="flex gap-3 pb-4">
@@ -344,9 +483,22 @@ export function Review() {
   const { p, pkg } = usePhotographer()
   const [agree, setAgree] = useState(true)
   const needsAccount = supabaseConfigured && auth.status !== 'in'
-  const pay = () => {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const pay = async () => {
     if (needsAccount) { set({ afterAuth: 'review' }); return go('auth') }
-    go('gateway')
+    if (!supabaseConfigured) return go('gateway')
+    setBusy(true)
+    setError('')
+    try {
+      const booking = await market.createBooking({ packageId: pkg.id, date: state.date, time: state.time, gateway: state.payment })
+      set({ reservation: booking })
+      go('gateway')
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusy(false)
+    }
   }
   const total = pkg.price
   const method = PAY_METHODS.find((m) => m.id === state.payment)
@@ -354,7 +506,10 @@ export function Review() {
     <Screen
       footer={
         <>
-          <Button disabled={!agree} onClick={pay}>{needsAccount ? 'Sign in to pay' : `Pay ${money(total)} securely`}</Button>
+          {error && <p role="alert" className="mb-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+          <Button disabled={!agree || busy || !state.date} onClick={pay}>
+            {busy ? 'Reserving…' : needsAccount ? 'Sign in to continue' : supabaseConfigured ? 'Reserve this date' : `Pay ${money(total)} securely`}
+          </Button>
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-neutral-500"><Icon.Lock size={12} /> Encrypted & secure</div>
         </>
       }
@@ -386,6 +541,11 @@ export function Review() {
           <span className="font-display text-[26px] font-extrabold">{money(total)}</span>
         </div>
 
+        {supabaseConfigured && (
+          <Notice tone="cream" className="mb-4" icon={<Icon.Calendar size={18} />} title="Online payment is being connected">
+            You can reserve this date now. We hold it for 30 minutes. Payment with Ozow and PayFast switches on shortly.
+          </Notice>
+        )}
         <Notice icon={<Icon.Lock size={18} />} title="Your money stays yours. Until delivery.">
           {money(total)} is held securely in escrow. {p.name.split(' ')[0]} receives the first part 24 hours after your shoot, and the rest once your photos are delivered. No extra fees for you.
           <button className="mt-1.5 block font-semibold text-link" onClick={() => go('protection')}>View payment protection</button>
@@ -481,6 +641,63 @@ export function Protection() {
 
 /* ---------- 5d. Gateway hand-off (prototype stand-in for Ozow / PayFast) ---------- */
 export function Gateway() {
+  return supabaseConfigured ? <Reserved /> : <GatewayDemo />
+}
+
+/** Live app: the booking exists (awaiting payment). Payments are connected in the next step. */
+function Reserved() {
+  const { jump, go, set, state } = useApp()
+  const { p, pkg } = usePhotographer()
+  const b = state.reservation
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  if (!b) return <Screen footer={<Button onClick={() => jump('home')}>Back to home</Button>}><div className="px-5 pt-10"><H1>Nothing reserved.</H1></div></Screen>
+  const cancel = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await market.cancelBooking(b.id, 'Cancelled before payment')
+      set({ reservation: null })
+      jump('home')
+    } catch (e) {
+      setError(explain(e))
+      setBusy(false)
+    }
+  }
+  const when = new Date(`${b.shoot_date}T00:00:00`)
+  return (
+    <Screen
+      footer={
+        <div className="space-y-3">
+          {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+          <Button onClick={() => jump('bookings')}>View my bookings</Button>
+          <Button variant="soft" arrow={false} disabled={busy} onClick={cancel}>{busy ? 'Cancelling…' : 'Cancel this reservation'}</Button>
+        </div>
+      }
+    >
+      <TopBar title="Reserved" />
+      <div className="px-5">
+        <div className="mt-2 flex h-16 w-16 items-center justify-center rounded-full bg-cream text-amber-700"><Icon.Calendar size={28} /></div>
+        <H1 className="mt-5">Your date is<br />reserved.</H1>
+        <p className="mt-2 text-[14px] leading-relaxed text-neutral-600">
+          We’re holding this slot for 30 minutes. Online payment with Ozow and PayFast is being connected, so you can’t pay just yet.
+        </p>
+        <div className="mt-5 rounded-2xl bg-surface p-4">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">{pkg.name} session</div>
+          <div className="mt-1 font-display text-[22px] font-bold">{p.name}</div>
+          <div className="mt-2 flex items-center gap-2 text-[13px] text-neutral-600"><Icon.Calendar size={16} /> {DAYS_SHORT[when.getDay()]}, {when.getDate()} {MONTHS[when.getMonth()]} {when.getFullYear()} · {String(b.shoot_time).slice(0, 5)}</div>
+          <div className="mt-3 flex items-end justify-between text-[12px] text-neutral-500">
+            <span>Booking {b.booking_ref}</span>
+            <span className="text-[14px] font-semibold text-ink">{money(Number(b.total_amount))}</span>
+          </div>
+        </div>
+        <Notice icon={<Icon.Lock size={18} />} className="mt-4" title="Nothing has been charged">You only pay once online payment is switched on.</Notice>
+      </div>
+    </Screen>
+  )
+}
+
+function GatewayDemo() {
   const { back, jump, set, state } = useApp()
   const method = PAY_METHODS.find((m) => m.id === state.payment)
   const [ready, setReady] = useState(false)
@@ -548,7 +765,7 @@ const STAGES = [
   ['delivered', 'Photos delivered', 'You have 48 hours to review, or approve sooner'],
   ['released', 'Payment released', 'The rest is paid to your photographer'],
 ]
-export function Bookings() {
+function BookingsDemo() {
   const { state, set, go } = useApp()
   const { p, pkg } = usePhotographer()
   const idx = STAGES.findIndex(([k]) => k === state.bookingStage)
@@ -605,8 +822,121 @@ export function Bookings() {
   )
 }
 
+/* ---------- 6c. Live: my bookings ---------- */
+const STATUS = {
+  pending: ['Awaiting payment', 'bg-cream text-amber-700'],
+  confirmed: ['Confirmed', 'bg-emerald-50 text-ok'],
+  in_progress: ['In progress', 'bg-info text-link'],
+  gallery_uploaded: ['Photos ready', 'bg-info text-link'],
+  completed: ['Completed', 'bg-surface text-neutral-600'],
+  disputed: ['Under review', 'bg-rose-50 text-rose-700'],
+  cancelled: ['Cancelled', 'bg-surface text-neutral-500'],
+}
+const HOLD_MS = 30 * 60 * 1000
+const statusOf = (b) => (b.status === 'pending' && Date.now() - new Date(b.created_at).getTime() > HOLD_MS ? ['Expired', 'bg-surface text-neutral-500'] : STATUS[b.status] || [b.status, 'bg-surface'])
+
+function BookingsLive() {
+  const { auth, go, set } = useApp()
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState('')
+  const userId = auth.user?.id
+
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      setItems(await market.myBookings(userId))
+    } catch (e) {
+      setError(explain(e))
+      setItems([])
+    }
+  }, [userId])
+  useEffect(() => { if (userId) load() }, [userId, load])
+
+  const cancel = async (id) => {
+    setBusy(id)
+    setError('')
+    try {
+      await market.cancelBooking(id, 'Cancelled before payment')
+      await load()
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  if (auth.status !== 'in') {
+    return (
+      <Screen nav={<AppNav active="bookings" />} footer={<Button onClick={() => { set({ afterAuth: 'bookings' }); go('auth') }}>Sign in</Button>}>
+        <div className="px-5 pt-3"><H1>My bookings</H1><p className="mt-2 text-[14px] text-neutral-600">Sign in to see your bookings.</p></div>
+      </Screen>
+    )
+  }
+  return (
+    <Screen nav={<AppNav active="bookings" />}>
+      <div className="px-5 pt-3">
+        <H1>My bookings</H1>
+        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="mt-6 text-[13px] text-neutral-500">Loading…</p>}
+        {items && items.length === 0 && !error && (
+          <Notice className="mt-5" icon={<Icon.Calendar size={18} />} title="No bookings yet">Find a photographer and reserve a date.</Notice>
+        )}
+        <div className="mt-5 space-y-3 pb-5">
+          {items?.map((b) => {
+            const [label, tone] = statusOf(b)
+            const when = new Date(`${b.shoot_date}T00:00:00`)
+            const canCancel = b.status === 'pending' && label === 'Awaiting payment'
+            return (
+              <div key={b.id} className="rounded-2xl bg-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[15px] font-semibold">{b.photographerName}</div>
+                    <div className="text-[12px] text-neutral-500">{b.packageName} · {when.getDate()} {MONTHS[when.getMonth()].slice(0, 3)} {when.getFullYear()} · {String(b.shoot_time).slice(0, 5)}</div>
+                  </div>
+                  <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-[12px] text-neutral-500">
+                  <span>{b.booking_ref}</span>
+                  <span className="text-[14px] font-semibold text-ink">{money(Number(b.total_amount))}</span>
+                </div>
+                {canCancel && (
+                  <button onClick={() => cancel(b.id)} disabled={busy === b.id} className="mt-3 text-[13px] font-semibold text-link disabled:opacity-50">
+                    {busy === b.id ? 'Cancelling…' : 'Cancel reservation'}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </Screen>
+  )
+}
+
+export function Bookings() {
+  return supabaseConfigured ? <BookingsLive /> : <BookingsDemo />
+}
+
 /* ---------- 7. Chat ---------- */
 export function Chat() {
+  return supabaseConfigured ? <ChatSoon /> : <ChatDemo />
+}
+
+function ChatSoon() {
+  return (
+    <Screen nav={<AppNav active="messages" />}>
+      <div className="px-5 pt-3">
+        <H1>Messages</H1>
+        <Notice className="mt-5" icon={<Icon.Message size={18} />} title="Chat opens after you book">
+          Once a booking is paid, you and your photographer can message here, share photos and agree the location. Chat is coming soon.
+        </Notice>
+      </div>
+    </Screen>
+  )
+}
+
+function ChatDemo() {
   const { back, go } = useApp()
   const { p } = usePhotographer()
   const [msgs, setMsgs] = useState([

@@ -196,7 +196,14 @@ function Dashboard({ live }) {
           {!live && <button className="text-[13px] font-semibold text-link">Edit calendar</button>}
         </div>
         {live ? (
-          <Notice tone="cream" icon={<Icon.Calendar size={18} />} title="Calendar coming next">Soon you’ll choose the days you’re available. Clients can book you once that’s ready.</Notice>
+          <button onClick={() => go('availability')} className="flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left">
+            <Icon.Calendar size={22} />
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold">Set your available days</div>
+              <div className="text-[12px] text-neutral-500">Clients can only book days you’ve opened.</div>
+            </div>
+            <Icon.Chevron size={18} />
+          </button>
         ) : (
           <div className="flex gap-2">
             {week.map(([l, n]) => {

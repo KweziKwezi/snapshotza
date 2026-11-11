@@ -6,12 +6,14 @@ import {
 } from './screens/Client.jsx'
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
 import { AdminList, AdminReview } from './screens/Admin.jsx'
+import { Availability } from './screens/Calendar.jsx'
 import { OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
 
 const SCREENS = {
   splash: Splash,
   auth: Auth,
   account: Account,
+  availability: Availability,
   adminList: AdminList,
   adminReview: AdminReview,
   home: Home,
@@ -39,7 +41,7 @@ const MENU = [
     ['gateway', 'Gateway hand-off (mock)', true], ['confirmed', 'Booking confirmed'], ['bookings', 'My bookings & escrow', true], ['chat', 'Chat'],
   ]],
   ['Photographer', [
-    ['studio', 'Studio dashboard'], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
+    ['studio', 'Studio dashboard'], ['availability', 'Availability calendar', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
   ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true]]],

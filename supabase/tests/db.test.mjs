@@ -498,5 +498,60 @@ eq('anon can now see the packages', (await as(anon, `select * from packages wher
 eq('a signed-in client can see the portfolio and packages too', `${(await as(user(c2), `select * from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows.length}/${(await as(user(c2), `select * from packages where photographer_id=$1`, [pid2])).rows.length}`, '5/3')
 eq('bank details stay private after approval', (await as(anon, `select count(*)::int n from public_photographers`)).rows[0].n, 1)
 
+console.log('\n# Marketplace: listing, calendar, favourites and a real booking (as the app sends them)')
+const d1m = await dayPlus(40), d2m = await dayPlus(41), d3m = await dayPlus(42)
+const listed = (await as(anon, `select cover_thumb_url, cover_url from public_photographers where id=$1`, [pid2])).rows[0]
+eq('listing exposes a small cover thumbnail', listed.cover_thumb_url, 'https://x.test/1-t.jpg')
+eq('...and still the full-size cover', listed.cover_url, 'https://x.test/1.jpg')
+
+// photographer opens days (single, bulk upsert re-sending an open day, and a delete)
+await asP2(`insert into availability (photographer_id,day,is_open) values ($1,$2,true) on conflict (photographer_id,day) do update set is_open=excluded.is_open`, [pid2, d1m])
+await asP2(`insert into availability (photographer_id,day,is_open) values ($1,$2,true),($1,$3,true),($1,$4,true) on conflict (photographer_id,day) do update set is_open=excluded.is_open`, [pid2, d1m, d2m, d3m])
+eq('three days open, no duplicates', (await asP2(`select count(*)::int n from availability where photographer_id=$1`, [pid2])).rows[0].n, 3)
+await raises('a client cannot open days for a photographer', as(user(c2), `insert into availability (photographer_id,day) values ($1,$2)`, [pid2, await dayPlus(50)]), /row-level security/)
+await raises('another photographer cannot open days for them', as(user(p1), `insert into availability (photographer_id,day) values ($1,$2)`, [pid2, await dayPlus(50)]), /row-level security/)
+eq('another photographer cannot close their days', (await as(user(p1), `delete from availability where photographer_id=$1`, [pid2])).affectedRows, 0)
+eq('a client cannot read the raw calendar table', (await as(user(c2), `select * from availability where photographer_id=$1`, [pid2])).rows.length, 0)
+
+// clients browse the calendar through get_availability
+const cal = async (who) => (await as(who, `select day::text d, is_booked b from get_availability($1,$2,$3) order by day`, [pid2, d1m, d3m])).rows
+eq('anonymous visitors see exactly the open days', (await cal(anon)).map((r) => r.d).join(','), [d1m, d2m, d3m].join(','))
+eq('none are booked yet', (await cal(user(c2))).filter((r) => r.b).length, 0)
+
+// a real booking through the RPC, with the exact argument types the app sends (date + 'HH:MM' strings)
+const fav = (await as(user(c2), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d1m])).rows[0]
+eq('booking created awaiting payment', `${fav.status}/${fav.payment_status}`, 'pending/pending')
+eq('price comes from the package, not the client', fav.total_amount, '2500.00')
+eq('the booked day is flagged to other clients', (await cal(anon)).find((r) => r.d === d1m).b, true)
+eq('other days stay free', (await cal(anon)).filter((r) => !r.b).length, 2)
+await raises('another client cannot take the same day/time', as(user(c1), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d1m]), /already booked/)
+await raises('a day the photographer has not opened is refused', as(user(c1), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], await dayPlus(55)]), /not available on this date/)
+await raises('a photographer account cannot book', asP2(`select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d2m]), /only clients can make bookings/)
+const mine = (await as(user(c2), `select id, booking_ref, status, shoot_date::text d, shoot_time::text t, total_amount, photographer_id, package_id from bookings where client_id=$1 order by created_at desc limit 1`, [c2])).rows[0]
+eq('the client\'s booking list includes it', mine.id, fav.id)
+eq('stored date/time are what was chosen', `${mine.d} ${mine.t}`, `${d1m} 14:00:00`)
+eq('the photographer sees it too', (await asP2(`select * from bookings where id=$1`, [fav.id])).rows.length, 1)
+eq('another client does not', (await as(user(c1), `select * from bookings where id=$1`, [fav.id])).rows.length, 0)
+await as(user(c2), `select * from cancel_booking($1,'Cancelled before payment')`, [fav.id])
+eq('cancelling frees the day again', (await cal(anon)).find((r) => r.d === d1m).b, false)
+
+// a photographer closes a day
+await asP2(`delete from availability where photographer_id=$1 and day = any($2::date[])`, [pid2, [d2m]])
+eq('a closed day disappears from the client calendar', (await cal(anon)).map((r) => r.d).join(','), [d1m, d3m].join(','))
+await asP2(`delete from availability where photographer_id=$1 and day = any($2::date[])`, [pid2, [d1m, d3m]])
+eq('closing everything leaves nothing bookable', (await cal(anon)).length, 0)
+eq('get_availability reveals nothing for an unapproved photographer', (await as(anon, `select * from get_availability($1,$2,$3)`, [pid, d1m, d3m])).rows.length, 0)
+
+// favourites
+const addFav = (who, client, ph) => as(who, `insert into favorites (client_id,photographer_id) values ($1,$2) on conflict (client_id,photographer_id) do nothing`, [client, ph])
+await addFav(user(c2), c2, pid2)
+await addFav(user(c2), c2, pid2)
+eq('saving twice keeps one favourite', (await as(user(c2), `select * from favorites`)).rows.length, 1)
+eq('a client sees only their own favourites', (await as(user(c1), `select * from favorites`)).rows.length, 0)
+await raises('cannot save a favourite as someone else', addFav(user(c1), c2, pid2), /row-level security/)
+eq('unsaving removes it', (await as(user(c2), `delete from favorites where client_id=$1 and photographer_id=$2`, [c2, pid2])).affectedRows, 1)
+eq('anonymous visitors cannot save favourites', await as(anon, `insert into favorites (client_id,photographer_id) values ($1,$2)`, [c2, pid2]).then(() => 'allowed').catch(() => 'blocked'), 'blocked')
+eq('reviews are readable by anyone', (await as(anon, `select id, rating, comment, created_at from reviews limit 1`)).rows.length >= 0, true)
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

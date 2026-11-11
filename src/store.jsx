@@ -17,6 +17,8 @@ const initial = {
   bookingStage: 'shoot_done', // paid -> shoot_done -> delivered -> released
   bookingRef: 'SZ-2048',
   paid: false,
+  selected: null, // live marketplace: { p, packages, portfolio, reviews } for the photographer being viewed
+  reservation: null, // the booking just created (awaiting payment)
   afterAuth: null, // screen to return to once the user has signed in
   // photographer
   studio: {

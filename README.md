@@ -54,7 +54,7 @@ Verification is now step 5 of 5.
 npm run test:db
 ```
 Loads migrations 1-3 into an in-process Postgres (PGlite) with a stub of Supabase's `auth` schema and roles, then
-runs the full lifecycle as different users (211 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
+runs the full lifecycle as different users (241 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
 tiers, the review window, auto-promotion, all cancellation cases, disputes, and that each role can only see and do what it should.
 Migration 4 (storage, pg_cron) needs real Supabase and is **not** covered by this test.
 
@@ -101,3 +101,9 @@ Run these in the Supabase SQL Editor, in order, after the first four migrations:
 ## Checking the app's queries against the live API
 `npm run check:api` sends every query shape the app uses to your Supabase project (read-only, anonymous) and fails on
 PostgREST planning errors such as ambiguous embeds (PGRST201). Run it after any change to `src/lib/queries.js` or to table relationships.
+
+## Marketplace (live)
+The home screen, search/filters, photographer profile (portfolio, packages, reviews) and the date picker now read real data.
+Photographers open their days under Studio -> Set your available days; clients can only book open days. Reserving a date
+creates a real `pending` booking (the database holds the slot for 30 minutes); payment is connected in the next step.
+Run `20261111000007_listing_thumbnails.sql` in the Supabase SQL Editor (home grid loads small thumbnails).

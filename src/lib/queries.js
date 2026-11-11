@@ -22,4 +22,14 @@ export const APP_SELECTS = [
   ['payout_accounts', '*'],
   ['verification_documents', 'doc_type, storage_path'],
   ['public_photographers', '*'],
+  ['reviews', 'id, rating, comment, created_at'],
+  ['favorites', 'photographer_id'],
+  ['availability', 'day'],
+  ['bookings', 'shoot_date'],
+  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, total_amount, created_at, photographer_id, package_id'],
+]
+
+/** Database functions the app calls (name, arguments). Sent anonymously; a harmless "not allowed" answer is fine. */
+export const APP_RPCS = [
+  ['get_availability', { p_photographer: '00000000-0000-0000-0000-000000000000', p_from: '2026-01-01', p_to: '2026-01-31' }],
 ]

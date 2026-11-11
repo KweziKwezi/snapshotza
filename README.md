@@ -97,3 +97,7 @@ to the private ID photos) in the app under Account -> Review photographers.
 
 Run these in the Supabase SQL Editor, in order, after the first four migrations:
 `20261110000005_portfolio_storage.sql` (photo buckets and rules), then `20261110000006_fix_public_read_policies.sql`.
+
+## Checking the app's queries against the live API
+`npm run check:api` sends every query shape the app uses to your Supabase project (read-only, anonymous) and fails on
+PostgREST planning errors such as ambiguous embeds (PGRST201). Run it after any change to `src/lib/queries.js` or to table relationships.

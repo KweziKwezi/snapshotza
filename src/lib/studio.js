@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js'
+import { Q } from './queries.js'
 
 export const BUCKET = { portfolio: 'portfolio', docs: 'verification-docs', avatars: 'avatars' }
 
@@ -197,7 +198,7 @@ export async function submitForVerification(photographerId) {
 /* ------------------------------------------------------------ admin side */
 export async function listPendingPhotographers() {
   const res = await supabase.from('photographer_profiles')
-    .select('id, location, specialties, created_at, profiles(full_name, email, phone)')
+    .select(Q.pendingList)
     .eq('verification_status', 'pending_verification').order('created_at')
   must(res)
   return res.data || []
@@ -206,7 +207,7 @@ export async function listPendingPhotographers() {
 /** Everything an admin needs to decide, including short-lived links to the private ID photos. */
 export async function loadReviewPack(photographerId) {
   const [pp, photos, packages, bank, docs] = await Promise.all([
-    supabase.from('photographer_profiles').select('*, profiles(full_name, email, phone)').eq('id', photographerId).single(),
+    supabase.from('photographer_profiles').select(Q.reviewPhotographer).eq('id', photographerId).single(),
     supabase.from('photos').select('id, thumbnail_url, url').eq('photographer_id', photographerId).eq('is_portfolio', true).order('upload_order'),
     supabase.from('packages').select('*').eq('photographer_id', photographerId).order('sort_order'),
     supabase.from('payout_accounts').select('*').eq('photographer_id', photographerId).maybeSingle(),

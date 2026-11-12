@@ -146,3 +146,8 @@ Run `supabase/migrations/20261115000011_package_snapshot.sql` after 0010.
 - A booking remembers the photo count it was sold with, so editing a package never changes an existing client's entitlement.
 - **Test bookings only** (test mode on): delivery needs the *lower* of what was sold and the package's current count, so shrinking a package to 3 photos makes an existing test booking easy to deliver. Real bookings always need the full count.
 - Tests: `npm run test:db` (396 checks).
+
+## Photographers can edit everything (Profile tab -> Manage your studio)
+- **Profile & photo** (name, place, specialties, bio, profile picture), **Portfolio** (add, remove, choose the cover; at least 5 photos stay), **Packages**, **Hours & days**, **Bank details**.
+- Changing bank details pauses that photographer's withdrawals until an admin re-checks them: Account > **Bank checks** (admin).
+- The app now switches to a new version by itself (no double reload), waiting if someone is mid-upload.

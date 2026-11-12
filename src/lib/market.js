@@ -477,3 +477,36 @@ export async function bankCheckCount() {
   const res = await supabase.from('photographer_profiles').select('id', { count: 'exact', head: true }).eq('verification_status', 'approved').eq('bank_verified', false)
   return res.error ? 0 : res.count || 0
 }
+
+/* ------------------------------------------------------------------ chat */
+export async function listConversations() {
+  const res = await supabase.rpc('my_conversations')
+  must(res, 'Could not load your messages.')
+  return res.data || []
+}
+export async function chatUnread() {
+  const res = await supabase.rpc('chat_unread')
+  return res.error ? 0 : Number(res.data) || 0
+}
+export async function loadMessages(bookingId) {
+  const res = await supabase.from('chat_messages').select('id, sender_id, message_type, content, created_at')
+    .eq('booking_id', bookingId).order('created_at', { ascending: false }).limit(200)
+  must(res, 'Could not load the messages.')
+  return (res.data || []).reverse()
+}
+export async function sendMessage(bookingId, userId, text) {
+  const res = await supabase.from('chat_messages').insert({ booking_id: bookingId, sender_id: userId, message_type: 'text', content: text }).select('id, sender_id, message_type, content, created_at').single()
+  if (res.error && /row-level security/i.test(res.error.message)) throw new Error('This chat is closed.')
+  must(res, 'Could not send your message.')
+  return res.data
+}
+export async function markChatRead(bookingId) {
+  await supabase.rpc('mark_chat_read', { p_booking: bookingId })
+}
+/** Calls onMessage for each new message in this booking, instantly. Returns a function that stops listening. */
+export function watchMessages(bookingId, onMessage) {
+  const channel = supabase.channel(`chat-${bookingId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `booking_id=eq.${bookingId}` }, (p) => onMessage(p.new))
+    .subscribe()
+  return () => { supabase.removeChannel(channel) }
+}

@@ -7,6 +7,7 @@ import {
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
 import { AdminBanks, AdminList, AdminPayouts, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
 import { Notifications } from './screens/Notifications.jsx'
+import { Thread } from './screens/Chat.jsx'
 import { Availability } from './screens/Calendar.jsx'
 import { Earnings, StudioBookings } from './screens/Earnings.jsx'
 import { supabaseConfigured } from './lib/supabase.js'
@@ -35,6 +36,7 @@ const SCREENS = {
   confirmed: Confirmed,
   bookings: BookingsRoute,
   chat: Chat,
+  thread: Thread,
   studio: Studio,
   onbProfile: OnbProfile,
   onbPortfolio: OnbPortfolio,

@@ -5,6 +5,7 @@ import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import { GalleryPanel } from './Delivery.jsx'
+import { Messages, MessageButton } from './Chat.jsx'
 import {
   Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, NotificationBell, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
@@ -36,7 +37,7 @@ const endTime = (time, hours) => {
 
 const NAV_TARGET = { home: 'home', messages: 'chat', bookings: 'bookings' }
 export function AppNav({ active }) {
-  const { jump, auth, set } = useApp()
+  const { jump, auth, set, state } = useApp()
   const onSelect = (id) => {
     if (id !== 'profile') return jump(NAV_TARGET[id])
     // Profile tab: photographers land on their studio, signed-in users on their account, everyone else signs in.
@@ -44,7 +45,7 @@ export function AppNav({ active }) {
     if (auth.status === 'out' && supabaseConfigured) return jump('auth')
     return jump('studio') // demo mode (no Supabase keys): keep the design walkthrough working
   }
-  return <BottomNav active={active} onSelect={onSelect} />
+  return <BottomNav active={active} onSelect={onSelect} badges={{ messages: auth.status === 'in' ? state.chatUnread : 0 }} />
 }
 
 /* ---------- 1. Splash ---------- */
@@ -1183,6 +1184,7 @@ function ClientBookingCard({ b, sim, onChanged }) {
         </div>
       )}
 
+      <MessageButton b={b} />
       <ReportLink b={b} role="client" onChanged={onChanged} />
       {b.status === 'cancelled' && b.payment_status === 'refunded' && <p className="mt-3 text-[12px] text-neutral-500">Refunded{b.simulated ? ' (test)' : ''}.</p>}
       {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
@@ -1237,20 +1239,7 @@ export function Bookings() {
 
 /* ---------- 7. Chat ---------- */
 export function Chat() {
-  return supabaseConfigured ? <ChatSoon /> : <ChatDemo />
-}
-
-function ChatSoon() {
-  return (
-    <Screen nav={<AppNav active="messages" />}>
-      <div className="px-5 pt-3">
-        <H1>Messages</H1>
-        <Notice className="mt-5" icon={<Icon.Message size={18} />} title="Chat opens after you book">
-          Once a booking is paid, you and your photographer can message here, share photos and agree the location. Chat is coming soon.
-        </Notice>
-      </div>
-    </Screen>
-  )
+  return supabaseConfigured ? <Messages /> : <ChatDemo />
 }
 
 function ChatDemo() {

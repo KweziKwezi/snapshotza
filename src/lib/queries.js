@@ -37,6 +37,7 @@ export const APP_SELECTS = [
   ['packages', 'id, name, num_photos'],
   ['payout_accounts', 'photographer_id, bank_name, account_holder, account_number, account_type, branch_code, updated_at'],
   ['photographer_profiles', 'id, user_id'],
+  ['chat_messages', 'id, sender_id, message_type, content, created_at'],
   ['notifications', 'id, type, title, body, booking_id, created_at, read_at'],
   ['disputes', 'id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by'],
   ['disputes', '*'],
@@ -60,6 +61,9 @@ export const APP_RPCS = [
   ['simulate_delivery', { p_booking: NIL }],
   ['deliver_gallery', { p_booking: NIL }],
   ['delivery_required', { p_booking: NIL }],
+  ['my_conversations', {}],
+  ['chat_unread', {}],
+  ['mark_chat_read', { p_booking: NIL }],
   ['admin_verify_bank', { p_photographer: NIL }],
   ['admin_complete_payout', { p_payout: NIL, p_bank_reference: 'check' }],
 ]

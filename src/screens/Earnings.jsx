@@ -6,6 +6,7 @@ import { DAYS_SHORT, MONTHS, money } from '../data.js'
 import { AppNav } from './Client.jsx'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import { DeliveryPanel } from './Delivery.jsx'
+import { MessageButton } from './Chat.jsx'
 import { Button, H1, Icon, Notice, Screen, TopBar } from '../ui.jsx'
 
 const TestTag = () => <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>
@@ -225,6 +226,7 @@ function StudioBookingCard({ b, sim, onChanged }) {
       {b.status === 'gallery_uploaded' && <p className="mt-3 text-[12px] text-neutral-600">Waiting for the client to approve. The rest is released when they approve, or automatically after 48 hours.</p>}
       {testable && b.status === 'gallery_uploaded' && <Button className="mt-2.5" variant="dark" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 48-hour wait'}</Button>}
       {b.status === 'completed' && <p className="mt-3 text-[12px] text-neutral-600">All paid out. Withdraw it from Earnings.</p>}
+      <MessageButton b={b} />
       <ReportLink b={b} role="photographer" onChanged={onChanged} />
       <ErrorNote error={error} />
     </div>

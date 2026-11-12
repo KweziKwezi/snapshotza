@@ -11,6 +11,7 @@ const ICON = {
   payout_sent: Icon.Check,
   confirm_shoot: Icon.Camera,
   new_booking: Icon.Calendar,
+  chat_message: Icon.Message,
   booking_cancelled: Icon.Close,
   issue_received: Icon.Shield,
   issue_reported: Icon.Shield,
@@ -52,6 +53,10 @@ export function Notifications() {
 
   const open = (n) => {
     if (n.type === 'dispute_opened' && isAdmin) return go('adminReports')
+    if (n.type === 'chat_message' && n.booking_id) {
+      set({ chatBooking: n.booking_id })
+      return go('thread')
+    }
     if (n.booking_id) return go('bookings')
   }
 

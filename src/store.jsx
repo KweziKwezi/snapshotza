@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase, supabaseConfigured } from './lib/supabase.js'
 import { loadAccount, signOut as apiSignOut } from './lib/auth.js'
 import { loadStudio, studioState } from './lib/studio.js'
-import { getTestMode, unreadCount } from './lib/market.js'
+import { chatUnread, getTestMode, unreadCount } from './lib/market.js'
 
 const Ctx = createContext(null)
 export const useApp = () => useContext(Ctx)
@@ -19,6 +19,8 @@ const initial = {
   bookingRef: 'SZ-2048',
   paid: false,
   unread: 0, // unread in-app notifications for the signed-in user
+  chatUnread: 0, // unread chat messages
+  chatBooking: null, // the booking whose chat is open
   sim: false, // TEST MODE: payments and payouts are simulated (platform_settings.simulate_payments)
   selected: null, // live marketplace: { p, packages, portfolio, reviews } for the photographer being viewed
   reservation: null, // the booking just created (awaiting payment)
@@ -89,8 +91,8 @@ export function AppProvider({ children, start = 'splash' }) {
   const uid = auth.status === 'in' ? auth.user?.id : null
   const refreshUnread = useCallback(async () => {
     if (!uid) return
-    const n = await unreadCount()
-    setState((s) => (s.unread === n ? s : { ...s, unread: n }))
+    const [n, c] = await Promise.all([unreadCount(), chatUnread()])
+    setState((s) => (s.unread === n && s.chatUnread === c ? s : { ...s, unread: n, chatUnread: c }))
   }, [uid])
   useEffect(() => {
     if (!uid) return undefined

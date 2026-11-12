@@ -870,5 +870,60 @@ const dr = (b, who) => as(who, `select delivery_required($1) n`, [b]).then((r) =
   await asP2(`update packages set num_photos = 100 where id=$1`, [pk2[1]])
 }
 
+console.log('\n# Chat')
+{
+  const cb = await pastShoot(c1, pk2[0])                       // paid, between c1 and p2
+  const send = (who, text, booking = cb) => as(user(who), `insert into chat_messages (booking_id,sender_id,content) values ($1,$2,$3) returning *`, [booking, who, text])
+  const convos = (who) => as(user(who), `select * from my_conversations()`).then((r) => r.rows)
+  const unreadNotes = (uid) => su(`select count(*)::int n from notifications where user_id=$1 and type='chat_message' and read_at is null and booking_id=$2`, [uid, cb]).then((r) => r.rows[0].n)
+
+  await raises('an empty message is refused', send(c1, '   '), /write a message first/)
+  await raises('a huge message is refused', send(c1, 'x'.repeat(2001)), /too long/)
+  eq('the message is trimmed and saved', (await send(c1, '  Hi Lerato, can we do the beach?  ')).rows[0].content, 'Hi Lerato, can we do the beach?')
+  eq('the photographer is notified once', await unreadNotes(p2), 1)
+  await send(c1, 'Also, what should we wear?')
+  await send(c1, 'And parking?')
+  eq('...not once per message', await unreadNotes(p2), 1)
+  eq('the notification shows the sender and a preview', (await su(`select title||'|'||body t from notifications where user_id=$1 and type='chat_message' order by created_at limit 1`, [p2])).rows[0].t, 'New message from ' + (await su(`select split_part(full_name,' ',1) n from profiles where id=$1`, [c1])).rows[0].n + '|Hi Lerato, can we do the beach?')
+  eq('the sender is not notified of their own message', await su(`select count(*)::int n from notifications where user_id=$1 and type='chat_message' and booking_id=$2`, [c1, cb]).then((r) => r.rows[0].n), 0)
+
+  const mine = await convos(p2)
+  const row = mine.find((r) => r.booking_id === cb)
+  eq('the photographer sees the conversation with the client name', row && row.other_name, (await su(`select full_name n from profiles where id=$1`, [c1])).rows[0].n)
+  eq('...3 unread, last message "And parking?"', `${row.unread}/${row.last_message}/${row.last_from_me}`, '3/And parking?/false')
+  eq('the sender has nothing unread', (await convos(c1)).find((r) => r.booking_id === cb).unread, 0)
+  eq('chat_unread totals them', (await as(user(p2), `select chat_unread() n`)).rows[0].n >= 3, true)
+  eq('a stranger sees no conversations', (await convos(c2)).some((r) => r.booking_id === cb), false)
+  eq('...and no unread', (await as(user(c2), `select chat_unread() n`)).rows[0].n, 0)
+  await raises('a stranger cannot mark it read', as(user(c2), `select mark_chat_read($1)`, [cb]), /not allowed/)
+  await raises('visitors cannot call the chat functions', as(anon, `select * from my_conversations()`), /permission denied/)
+
+  await as(user(p2), `select mark_chat_read($1)`, [cb])
+  eq('opening the chat clears the unread count', (await convos(p2)).find((r) => r.booking_id === cb).unread, 0)
+  eq('...and the notification', await unreadNotes(p2), 0)
+  await send(p2, 'Beach works! Wear light colours.')
+  eq('a reply notifies the client', await unreadNotes(c1), 1)
+  eq('...and shows as 1 unread for them', (await convos(c1)).find((r) => r.booking_id === cb).unread, 1)
+  await send(c1, 'Another message')
+  eq('a new message after reading notifies again', await unreadNotes(p2), 1)
+  eq('system messages never count as unread', (await su(`select count(*)::int n from chat_messages where booking_id=$1 and message_type='system'`, [cb])).rows[0].n > 0, true)
+
+  let stopped = ''
+  for (let i = 0; i < 40 && !stopped; i++) { try { await send(c1, 'spam ' + i) } catch (e) { stopped = e.message } }
+  ok('sending too fast is stopped (at most 30 a minute)', /too fast/.test(stopped), stopped)
+  await su(`delete from chat_messages where booking_id=$1 and content like 'spam %'`, [cb])
+  await su(`update chat_messages set created_at = created_at - interval '2 minutes' where sender_id=$1`, [c1])
+
+  // a booking nobody has paid for has no chat, and a cancelled one is closed
+  const dd = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, dd])
+  const unpaid = (await book(user(c2), pk2[0], dd, '10:00')).rows[0]
+  await raises('no chat before payment', send(c2, 'hello?', unpaid.id), /row-level security/)
+  eq('unpaid bookings are not listed as conversations', (await convos(c2)).some((r) => r.booking_id === unpaid.id), false)
+  await as(user(c1), `select * from cancel_booking($1,'changed my mind')`, [cb])
+  await raises('a cancelled booking is closed for new messages', send(c1, 'still there?'), /row-level security/)
+  eq('...but the history is still readable and listed', (await convos(c1)).some((r) => r.booking_id === cb && r.status === 'cancelled'), true)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

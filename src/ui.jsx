@@ -186,7 +186,7 @@ const TABS = [
   { id: 'bookings', label: 'Bookings', icon: Icon.Calendar },
   { id: 'profile', label: 'Profile', icon: Icon.User },
 ]
-export function BottomNav({ active, onSelect }) {
+export function BottomNav({ active, onSelect, badges = {} }) {
   return (
     <nav className="flex justify-around border-t border-line bg-white px-2 pb-2 pt-2">
       {TABS.map((t) => {
@@ -194,8 +194,11 @@ export function BottomNav({ active, onSelect }) {
         const Ic = t.icon
         return (
           <button key={t.id} onClick={() => onSelect(t.id)} className="flex w-16 flex-col items-center gap-1">
-            <span className={`flex h-8 w-10 items-center justify-center rounded-xl ${on ? 'bg-brand text-ink' : 'text-neutral-500'}`}>
+            <span className={`relative flex h-8 w-10 items-center justify-center rounded-xl ${on ? 'bg-brand text-ink' : 'text-neutral-500'}`}>
               <Ic size={20} />
+              {badges[t.id] > 0 && (
+                <span data-testid={`badge-${t.id}`} className="absolute -right-1 -top-1 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9.5px] font-bold text-white">{badges[t.id] > 9 ? '9+' : badges[t.id]}</span>
+              )}
             </span>
             <span className={`text-[10px] ${on ? 'font-semibold text-ink' : 'text-neutral-500'}`}>{t.label}</span>
           </button>

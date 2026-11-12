@@ -177,6 +177,12 @@ Run `supabase/migrations/20261119000015_contact_details.sql` after 0014.
 - Email changes go through Supabase's confirmation link; the profile follows once confirmed. Profiles cannot change their email directly, and a phone number cannot be removed once given.
 - A client needs a phone number to book. Tests: `npm run test:db` (517 checks).
 
-## Landing page and desktop layout
-- Signed-out visitors see a landing page (hero, photographers, how it works, payment protection and rates, for photographers, FAQ). "I'm a photographer" opens sign-up as a photographer; style chips open the list filtered.
-- Desktop (1024px+): a top bar replaces the bottom tabs; browsing screens use the full width (4 photographers across); lists use a medium column; forms stay a centred column. Phones are unchanged.
+## Website version and app version
+Same address, same accounts and data. The layout is chosen by screen size:
+- **Phones and tablets (under 1024px): the app** (bottom tabs, phone screens).
+- **Computers (1024px and wider): the website** (`src/screens/Web.jsx`): a site header (Find photographers, Messages, Bookings, notifications, account) and footer;
+  - Find photographers: search, a style sidebar, sorting, and a large grid;
+  - Photographer page: cover, bio, portfolio and reviews, with a booking panel that stays in view;
+  - Messages: conversation list and the open chat side by side;
+  - every other screen (booking steps, bookings, account, studio, admin) is shown as a centred page under the site header.
+- Signed-out visitors see the landing page on both.

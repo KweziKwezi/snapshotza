@@ -139,3 +139,10 @@ See `DELIVERY_SETUP.md` for the one-time setup (run migration 10, create the R2 
 - Clients see previews once delivered; full-size downloads unlock when the booking is completed, for 15 days. Approving the photos also confirms the shoot.
 - A daily cron deletes expired galleries (files, then the database rows).
 - Tests: `npm run test:db` (388 checks) and `npm run test:worker` (37 checks, fake R2 + fake Supabase).
+
+## Editing packages (migration 11)
+Run `supabase/migrations/20261115000011_package_snapshot.sql` after 0010.
+- Photographers edit packages any time from the dashboard: **My packages** (name, price, hours, edited photos, delivery time).
+- A booking remembers the photo count it was sold with, so editing a package never changes an existing client's entitlement.
+- **Test bookings only** (test mode on): delivery needs the *lower* of what was sold and the package's current count, so shrinking a package to 3 photos makes an existing test booking easy to deliver. Real bookings always need the full count.
+- Tests: `npm run test:db` (396 checks).

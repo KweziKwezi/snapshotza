@@ -3,7 +3,7 @@
 //   POST   /api/deliveries/:bookingId     photographer uploads one edited photo (multipart: file, preview)
 //   DELETE /api/photos/:photoId           photographer removes a photo before delivering
 //   GET    /api/photos/:photoId/:variant  preview | full  (add ?download=1 to save it as a file)
-//   cron                                  deletes galleries whose download period has ended
+//   cron (daily)                          deletes galleries whose download period has ended, and chats older than 20 days
 //
 // The browser proves who it is with its Supabase sign-in token. The database decides what that person may do
 // (supabase/migrations/0010); this file only moves bytes. Everything else is served from the built app.
@@ -151,6 +151,9 @@ export default {
   },
 
   async scheduled(_event, env) {
-    if (env.DELIVERIES && env.SUPABASE_SERVICE_KEY) await purgeExpired(env)
+    if (!env.SUPABASE_SERVICE_KEY) return
+    // Each job runs on its own, so a problem with one never stops the other.
+    if (env.DELIVERIES) await purgeExpired(env).catch(() => {})
+    await rpc(env, 'purge_old_chats', {}).catch(() => {})
   },
 }

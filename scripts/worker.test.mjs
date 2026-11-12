@@ -58,7 +58,7 @@ const reset = () => {
     worker_register_photo: (a) => ({ id: a.p_photo, storage_path: `deliveries/${a.p_booking}/${a.p_photo}.full`, preview_path: `deliveries/${a.p_booking}/${a.p_photo}.preview`, file_name: a.p_name, size_bytes: a.p_size }),
     worker_remove_photo: { id: PHOTO, storage_path: `deliveries/${BOOKING}/${PHOTO}.full`, preview_path: `deliveries/${BOOKING}/${PHOTO}.preview` },
     worker_photo_key: `deliveries/${BOOKING}/${PHOTO}.full`,
-    list_expired_galleries: [], mark_gallery_purged: null,
+    list_expired_galleries: [], mark_gallery_purged: null, purge_old_chats: 3,
   }
 }
 const err = (message, code) => Object.assign(new Error(message), { code })
@@ -149,8 +149,13 @@ ok('...and the database is told afterwards', calls.some((c) => c.name === 'mark_
 reset(); env = mkEnv()
 await worker.scheduled({}, env)
 ok('the daily job with nothing expired does nothing', !calls.some((c) => c.name === 'mark_gallery_purged'))
+ok('the daily job also clears old chats', calls.some((c) => c.name === 'purge_old_chats'))
 await worker.scheduled({}, mkEnv({ SUPABASE_SERVICE_KEY: undefined }))
 ok('the daily job without a key does not crash', true)
+reset(); env = mkEnv()
+dbAnswer.list_expired_galleries = err('boom')
+await worker.scheduled({}, env)
+ok('a failure clearing galleries does not stop the chat clean-up', calls.some((c) => c.name === 'purge_old_chats'))
 
 globalThis.fetch = realFetch
 console.log(`\n${pass} passed, ${fail} failed`)

@@ -78,3 +78,4 @@ export const PAY_METHODS = [
 
 // Final (full-res) photos are deleted this many days after delivery. Mirrors platform_settings.gallery_retention_days.
 export const GALLERY_RETENTION_DAYS = 15
+export const CHAT_RETENTION_DAYS = 20

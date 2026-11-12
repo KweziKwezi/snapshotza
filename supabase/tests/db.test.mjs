@@ -925,5 +925,29 @@ console.log('\n# Chat')
   eq('...but the history is still readable and listed', (await convos(c1)).some((r) => r.booking_id === cb && r.status === 'cancelled'), true)
 }
 
+console.log('\n# Chats are deleted after 20 days')
+{
+  const cb = await pastShoot(c1, pk2[0])
+  const old = (days, text) => su(`insert into chat_messages (booking_id,sender_id,content,created_at) values ($1,$2,$3, now() - make_interval(days => $4))`, [cb, c1, text, days])
+  eq('the setting is 20 days', (await su(`select chat_retention_days n from platform_settings`)).rows[0].n, 20)
+  await old(21, 'ancient'); await old(19, 'recent'); await old(25, 'also ancient')
+  await raises('normal users cannot purge chats', as(user(c1), `select purge_old_chats()`), /permission denied/)
+  await raises('visitors cannot purge chats', as(anon, `select purge_old_chats()`), /permission denied/)
+  const n = (await as(svc, `select purge_old_chats() n`)).rows[0].n
+  const left = (await su(`select content from chat_messages where booking_id=$1 and message_type='text'`, [cb])).rows.map((r) => r.content)
+  ok('messages older than 20 days are deleted', n >= 2 && !left.includes('ancient') && !left.includes('also ancient'), JSON.stringify(left))
+  ok('...newer ones stay', left.includes('recent'))
+  eq('...and the booking itself is untouched', (await getB(cb)).status, 'confirmed')
+  // evidence is kept while a problem report is open
+  const cd = await pastShoot(c1, pk2[0])
+  await su(`insert into chat_messages (booking_id,sender_id,content,created_at) values ($1,$2,'evidence', now() - interval '40 days')`, [cd, c1])
+  const rep = (await as(user(c1), `select * from report_issue($1,'not_delivered','No photos have arrived at all, ever')`, [cd])).rows[0]
+  await as(svc, `select purge_old_chats()`)
+  eq('chats of a booking with an open problem report are kept', (await su(`select count(*)::int n from chat_messages where booking_id=$1 and content='evidence'`, [cd])).rows[0].n, 1)
+  await as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','fine')`, [rep.id])
+  await as(svc, `select purge_old_chats()`)
+  eq('...and follow the 20-day rule once it is decided', (await su(`select count(*)::int n from chat_messages where booking_id=$1 and content='evidence'`, [cd])).rows[0].n, 0)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -5,6 +5,7 @@ import { explain } from '../lib/studio.js'
 import { AppNav } from './Client.jsx'
 import { ago } from './Notifications.jsx'
 import { Icon, Notice, Screen, TopBar, H1, initials } from '../ui.jsx'
+import { CHAT_RETENTION_DAYS } from '../data.js'
 
 const POLL_MS = 6000
 
@@ -204,6 +205,7 @@ export function Thread() {
     >
       <TopBar title={info?.other_name || 'Chat'} onBack={back} />
       {info && <p className="px-5 text-[12px] text-neutral-500">{info.booking_ref} · {info.shoot_date} · {String(info.shoot_time).slice(0, 5)}</p>}
+      <p className="px-5 text-[11.5px] text-neutral-400">Messages are deleted after {CHAT_RETENTION_DAYS} days.</p>
       <div className="px-4 pb-3 pt-2" data-testid="thread">
         {msgs === null && <p className="mt-6 text-center text-[13px] text-neutral-500">Loading…</p>}
         {msgs?.length === 0 && <p className="mt-8 text-center text-[13px] text-neutral-500">No messages yet. Say hello and agree the details of your shoot.</p>}

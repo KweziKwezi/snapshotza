@@ -151,3 +151,10 @@ Run `supabase/migrations/20261115000011_package_snapshot.sql` after 0010.
 - **Profile & photo** (name, place, specialties, bio, profile picture), **Portfolio** (add, remove, choose the cover; at least 5 photos stay), **Packages**, **Hours & days**, **Bank details**.
 - Changing bank details pauses that photographer's withdrawals until an admin re-checks them: Account > **Bank checks** (admin).
 - The app now switches to a new version by itself (no double reload), waiting if someone is mid-upload.
+
+## Chat (migration 12)
+Run `supabase/migrations/20261116000012_chat.sql` after 0011.
+- Messages tab: one conversation per paid booking (newest first, unread counts, red badge on the tab). Open one to chat; new messages arrive within seconds (realtime, with a 6-second fallback).
+- A "Message" link sits on every paid booking card, and notifications for new messages open the chat.
+- Rules in the database: only the two people on a paid booking can read or write (admins can read for disputes); no empty or 2000+ character messages; at most 30 messages a minute; cancelled bookings keep their history but close for new messages. The other person gets one in-app notification until they open the chat (no pile-up).
+- Text only for now (photos in chat can come later). Tests: `npm run test:db` (422 checks).

@@ -19,6 +19,7 @@ How to use this: read it, change anything marked **[EDIT]**, answer the **questi
 | Photographer receives | Price minus commission minus processing. Called the **net amount**. |
 | Paid in two parts | **Deposit** = 30% / 40% / 50% of the net (Tier 1 / 2 / 3), released when the shoot is confirmed. **Final** = the rest, released when the client approves the photos (or after 48 hours). |
 | Deposit refundable? | **No.** Once released, the deposit is the photographer's. |
+| Client cancels | **Standard: no refund, but the date can be moved** (photographer approves). **With Refund Protection** (optional, **R50 non-refundable** at checkout): full refund if cancelled **at least 48 hours before the shoot**. Under 48 hours: no refund for anyone. |
 | Photographer no-show | Client gets **everything back, 100%**, within **14 days**. We carry the fees. |
 | Dispute: client wins | Client gets the **final part** back. Deposit stays with the photographer. |
 | Dispute: photographer wins | Photographer gets the final part. |
@@ -77,18 +78,48 @@ section 44 of the Electronic Communications and Transactions Act, allows up to 3
 
 Prices below use the R2,400 / Tier 1 example. "Platform" means SnapshotZA.
 
-### 3a. The client cancels before the shoot
+### 3a. The client cancels before the shoot (Refund Protection)
 
-| When | Client gets back | Photographer gets | Platform |
+At checkout the client chooses one of two options. Both are explained on screen before paying, with a tick box.
+
+| Option | What the client pays | If they cancel |
+|---|---|---|
+| **Standard** | The package price (R2,400) | **No refund.** They can move the date instead (3e). |
+| **Refund Protection** (optional) | The package price **plus R50** (the R50 is never refunded) | **Full refund of the package price** if they cancel **at least 48 hours before the shoot starts**. Less than 48 hours before: no refund. |
+
+R2,400 / Tier 1 example. "Platform" means SnapshotZA.
+
+| Situation | Client gets back | Photographer gets | Platform |
 |---|---|---|---|
-| **Within 7 days of booking**, if the shoot is more than 7 days away (cooling-off) | **R2,400 (100%)** | R0 | absorbs the R84 processing fee |
-| More than **7 days** before the shoot | **R2,316** (price minus the R84 processing fee, which we cannot get back from the gateway) [EDIT] | R0 | keeps R0 |
-| **2 to 7 days** before the shoot | **R1,200 (50%)** [EDIT] | R1,032 (the other R1,200 minus 7% and processing) | keeps R84 commission |
-| **Less than 48 hours** before the shoot | **R0** [EDIT: or a small refund, e.g. 25%] | **R2,148** (full net) | keeps R168 commission |
+| Standard, cancels at any time | R0 | **R2,148** (full net), paid after the original shoot date passes | keeps R168 commission |
+| Protection, cancels **48h or more** before | **R2,400** (see the fee options below) | R0 (the date is released so they can re-sell it) | keeps the R50; the R84 payment fee we already paid is lost |
+| Protection, cancels **under 48h** before | R0 | **R2,148** | keeps R168 commission and the R50 |
+| **Cooling-off** (legal minimum, see warning below): within 7 days of booking, shoot more than 7 days away | **R2,400** | R0 | absorbs the R84 payment fee |
 
-Why: the law (Consumer Protection Act, section 17) lets a client cancel an advance booking, but lets the business
-charge a *reasonable* cancellation charge. The later the cancellation, the less chance the photographer has to
-re-sell that date, so the charge grows.
+Refunds go back to the original payment method within **14 days** of the cancellation.
+
+**Warning: this rule meets two laws.** (1) The Electronic Communications and Transactions Act (ECTA) section 44
+gives online buyers a 7-day cooling-off right that the business cannot sign away. If it applies to a shoot booked for a
+specific date, a client who books and changes their mind within 7 days must be refunded even without Refund Protection.
+That is why the cooling-off row is there; **remove it only if your attorney confirms it does not apply.** (2) The
+Consumer Protection Act section 17 lets a client cancel an advance booking and lets you charge only a *reasonable*
+cancellation charge. "No refund at all unless you bought protection" may be challenged, which is why moving the date
+is always allowed for free.
+
+**Does R50 cover your cost? [EDIT: pick one]** A refund costs you the payment fee you already paid (the gateway does
+not give it back) plus the cost of sending the refund.
+
+| Package price | Payment fee lost (3.5%) | R50 kept minus that fee |
+|---|---|---|
+| R1,200 | R42 | **+R8** |
+| R2,400 | R84 | **-R34** |
+| R4,000 | R140 | **-R90** |
+
+(Before the small bank fee for sending the refund.) So a flat R50 only covers small packages. Options:
+
+- **A. Flat R50, full price refunded.** Simplest to explain ("get all your money back"). You lose money on bigger packages.
+- **B. Flat R50, refund = price minus the payment fee.** You never lose, but the client sees R2,316 back on a R2,400 booking, which feels like a trick if not shown upfront.
+- **C. (my suggestion) Protection price by package size, full price refunded.** For example R50 for packages up to R1,500, R100 up to R3,000, R150 above. Easy to explain, and it covers the payment fee and the refund transfer.
 
 ### 3b. The photographer cancels, or is a no-show
 
@@ -122,13 +153,16 @@ The refund formula in plain words: **the client gets back the share of the booki
 (for Tier 1: 70% of the price; Tier 2: 60%; Tier 3: 50%). Our commission on that refunded part is also returned to
 the client.
 
-### 3e. Rescheduling (date change)
+### 3e. Changing the date (the only flexibility on Standard bookings)
 
-- The client asks for a new date and time in the app; the photographer **approves or declines**.
-- Free if asked **at least 48 hours** before the shoot [EDIT] and the photographer is free at the new time.
-- If the photographer declines, the booking stays on the original date. The client may still cancel using 3a.
-- If the photographer cannot do either date, it counts as a photographer cancellation (3b).
+- The client asks for a new date and time in the app. The photographer **approves or declines**.
+- **Free**, if asked **at least 48 hours** before the shoot [EDIT], and the new time is free in the photographer's diary.
+- If the photographer declines (or does not answer within 48 hours [EDIT: the request lapses, the client is told]),
+  the booking stays on the original date. The client can ask again with different dates.
 - Maximum of **2 date changes** per booking [EDIT].
+- A date change does not change the price, the deposit rules or the 48-hour refund cut-off (the cut-off moves with the
+  new date).
+- If the photographer later cancels, it is a photographer cancellation (3b): the client gets everything back.
 
 ### 3f. Photos are delivered but the client goes quiet
 
@@ -177,7 +211,7 @@ If the client does not respond within **48 hours**, the photos count as approved
 | Commission | 5% | **7%** | small change |
 | Processing fee | 3.5% shown to the photographer | 3.5% (confirm per gateway) | none to small |
 | Photographer no-show | Client refunded the full amount minus what was paid out | Full 100% incl. fees, in 14 days, strike/suspension | change |
-| Client cancels | Refund minus platform fee if more than 48h; none if less | The ladder in 3a, plus 7-day cooling-off | change |
+| Client cancels | Refund minus the platform fee if more than 48h before; none if less (no choice at checkout) | Optional **Refund Protection** (R50 or banded), otherwise no refund; 48-hour cut-off; 7-day cooling-off if the lawyer confirms | change + checkout screen |
 | Dispute, client wins | Refund = price minus anything already paid out | Refund = the unpaid final share (same idea; fee part clarified) | small change |
 | Dispute, photographer wins | Photographer gets the rest | Same | none |
 | Client no-show | Handled as a report | Photographer gets full net | small change |
@@ -192,6 +226,8 @@ If the client does not respond within **48 hours**, the photos count as approved
   *reasonable* charge. Is a 0% refund inside 48 hours "reasonable" for a photography booking? Is the 50% band safe?
 - **ECTA (section 44):** 7-day cooling-off for online purchases, refund within 30 days. Whether it applies to a
   photo shoot on a specific date is a point to confirm (some services booked for a specific date are excluded).
+- **Refund Protection as a product:** an optional paid add-on that unlocks refunds. Check it is not treated as
+  insurance, and that the price and the 48-hour rule are shown clearly before payment.
 - **Clear disclosure:** the cancellation ladder and the non-refundable deposit must be shown **before** the client
   pays, and accepted with a tick box (the app will do this).
 - **POPIA:** privacy policy, retention periods (photos 15 days, chats 20 days), a person responsible for personal
@@ -206,18 +242,19 @@ If the client does not respond within **48 hours**, the photos count as approved
 
 ## 9. Questions for you
 
-1. **Payout transfer fee:** do we absorb it (A) or charge the photographer (B)? If B, how much?
-2. **Cancellation ladder (3a):** are the bands (7 days / 2 to 7 days / under 48h) and the 100% / 50% / 0% refunds
-   what you want?
-3. **Cooling-off:** do you want the 7-day full refund for early bookings (3a, first row)? It costs us the
-   processing fee when used.
-4. **Client no-show (3c):** photographer keeps everything, or the client gets some back?
-5. **Disputes (3d):** do you want the split-decision option? How many days for our decision?
-6. **Strikes (3b):** the penalties for photographer no-shows and cancellations.
-7. **Reschedules (3e):** the 48-hour cut-off and the limit of 2 changes.
-8. **Are you registered for VAT?** (Affects how we show the 7%.)
-9. **Which payment provider** will hold the money (PayFast, Ozow, Stitch, Peach, or another)? Their fees and
-   their "pay out to sellers" features decide a lot.
+1. **Refund Protection price (3a):** option A (flat R50, full refund, you lose on big packages), B (flat R50,
+   refund minus payment fee) or C (R50 / R100 / R150 by package size)?
+2. **Cooling-off:** keep the 7-day full refund for early bookings until the attorney confirms it does not apply?
+3. **Standard bookings (no protection):** does the photographer really keep the full net if the client cancels?
+   (That is what 3a assumes.)
+4. **Payout transfer fee:** do we absorb it (A) or charge the photographer (B, how much)?
+5. **Client no-show (3c):** photographer keeps everything, or the client gets some back?
+6. **Disputes (3d):** do you want the split-decision option? How many days for our decision?
+7. **Strikes (3b):** penalties for photographer no-shows and cancellations.
+8. **Date changes (3e):** the 48-hour cut-off and the limit of 2 changes.
+9. **Are you registered for VAT?** (Affects how we show the 7%.)
+10. **Which payment provider** will hold the money (PayFast, Ozow, Stitch, Peach, another)? Their fees and "pay
+    out to sellers" features decide a lot.
 
 ---
 

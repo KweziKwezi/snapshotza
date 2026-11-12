@@ -664,6 +664,7 @@ export function Review() {
   const { p, pkg } = usePhotographer()
   const [agree, setAgree] = useState(false)
   const needsAccount = supabaseConfigured && auth.status !== 'in'
+  const needsPhone = supabaseConfigured && auth.status === 'in' && !auth.profile?.phone
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const pay = async () => {
@@ -689,7 +690,12 @@ export function Review() {
       footer={
         <>
           {error && <p role="alert" className="mb-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
-          <Button disabled={!rate || !agree || busy || !state.date} onClick={pay}>
+          {needsPhone && (
+            <button onClick={() => go('editContact')} className="mb-2 w-full rounded-xl bg-cream p-3 text-left text-[13px]">
+              <b>Add your phone number to book.</b> Your photographer needs a way to reach you. <span className="font-semibold text-link">Add it now</span>
+            </button>
+          )}
+          <Button disabled={!rate || !agree || busy || !state.date || needsPhone} onClick={pay}>
             {busy ? 'Reserving…' : needsAccount ? 'Sign in to continue' : supabaseConfigured ? (state.sim ? 'Reserve & continue' : 'Reserve this date') : `Pay ${money(total)} securely`}
           </Button>
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-neutral-500"><Icon.Lock size={12} /> Encrypted & secure</div>

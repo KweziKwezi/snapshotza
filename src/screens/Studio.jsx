@@ -192,6 +192,14 @@ function Dashboard({ live }) {
           </p>
         </div>
 
+        {live && !auth.profile?.phone && (
+          <button onClick={() => go('editContact')} className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-cream p-4 text-left">
+            <Icon.Message size={20} />
+            <div className="flex-1"><div className="text-[13.5px] font-semibold">Add your phone number</div><div className="text-[12px] text-neutral-600">Clients need to be able to reach you on the day.</div></div>
+            <Icon.Chevron size={18} />
+          </button>
+        )}
+
         {live && auth.photographer.strike_count > 0 && (
           <Notice tone="cream" className="mt-4" icon={<Icon.Shield size={18} />} title={`You have ${auth.photographer.strike_count} strike${auth.photographer.strike_count > 1 ? 's' : ''}`}>
             Strikes come from cancelling a paid booking or not showing up. A second strike suspends your account for 30 days and a third removes it. Always cancel early and talk to your client in Messages.
@@ -208,6 +216,7 @@ function Dashboard({ live }) {
                 [Icon.Card, 'Packages', 'Prices, hours and photo counts', 'myPackages'],
                 [Icon.Calendar, 'Hours & days', 'When clients can book you', 'availability'],
                 [Icon.Bank, 'Bank details', 'Where we send your money', 'editBank'],
+                [Icon.Message, 'Contact details', 'Phone number and email', 'editContact'],
               ].map(([I, title, hint, to]) => (
                 <button key={to} onClick={() => go(to)} className="flex w-full items-center gap-3 p-4 text-left">
                   <I size={22} />

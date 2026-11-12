@@ -105,6 +105,7 @@ const BOOKING_MESSAGES = [
   ['not accepting bookings', 'This photographer is not taking bookings right now.'],
   ['not authenticated', 'Please sign in to book.'],
   ['choose the saver', 'Please choose the Saver or the Flexible rate.'],
+  ['add your phone number', 'Add your phone number to your account before booking.'],
 ]
 export async function createBooking({ packageId, date, time, gateway, rate }) {
   const res = await supabase.rpc('create_booking', {

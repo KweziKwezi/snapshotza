@@ -4,7 +4,7 @@ import { Icon } from './ui.jsx'
 import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
-import { Account, Auth, homeFor } from './screens/Auth.jsx'
+import { Account, Auth, EditContact, homeFor } from './screens/Auth.jsx'
 import { AdminBanks, AdminList, AdminPayouts, AdminRefunds, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
 import { Notifications } from './screens/Notifications.jsx'
 import { Thread } from './screens/Chat.jsx'
@@ -18,6 +18,7 @@ const SCREENS = {
   splash: Splash,
   auth: Auth,
   account: Account,
+  editContact: EditContact,
   availability: Availability,
   earnings: Earnings,
   adminList: AdminList,
@@ -60,7 +61,7 @@ function BookingsRoute() {
 
 const MENU = [
   ['Client', [
-    ['splash', 'Welcome'], ['auth', 'Sign in / sign up', true], ['account', 'Account', true], ['notifications', 'Notifications', true], ['home', 'Home'], ['profile', 'Photographer profile'], ['date', 'Choose date'],
+    ['splash', 'Welcome'], ['auth', 'Sign in / sign up', true], ['account', 'Account', true], ['editContact', 'Contact details', true], ['notifications', 'Notifications', true], ['home', 'Home'], ['profile', 'Photographer profile'], ['date', 'Choose date'],
     ['review', 'Review & pay'], ['payment', 'Payment method', true], ['protection', 'Payment protection', true],
     ['gateway', 'Gateway hand-off (mock)', true], ['confirmed', 'Booking confirmed'], ['bookings', 'My bookings & escrow', true], ['chat', 'Chat'],
   ]],

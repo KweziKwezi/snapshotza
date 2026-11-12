@@ -52,9 +52,10 @@ const user = (id) => ({ id, role: 'authenticated' })
 const anon = { id: null, role: 'anon' }
 const svc = { id: null, role: 'service_role' }
 const dayPlus = async (n) => (await su(`select (current_date + $1::int)::text d`, [n])).rows[0].d
-const mkUser = async (email, role, name) => {
+let phoneSeq = 1000000
+const mkUser = async (email, role, name, phone = `082${++phoneSeq}`) => {
   const id = randomUUID()
-  await su(`insert into auth.users (id, email, raw_user_meta_data) values ($1,$2,$3)`, [id, email, JSON.stringify({ role, full_name: name })])
+  await su(`insert into auth.users (id, email, raw_user_meta_data) values ($1,$2,$3)`, [id, email, JSON.stringify({ role, full_name: name, phone })])
   return id
 }
 
@@ -1142,6 +1143,42 @@ console.log('\n# Date changes (Flexible rate, photographer approves)')
   eq('cancelling a booking cancels its waiting request', (await su(`select status from reschedule_requests where id=$1`, [r5.id])).rows[0].status, 'cancelled')
   await raises('date changes only apply to paid, upcoming bookings', ask(c1, f3, await open2(67)), /only a paid booking/)
   await raises('normal users cannot call the strike or release helpers', as(user(p2), `select apply_strike($1,'x')`, [pid2]), /permission denied/)
+}
+
+console.log('\n# Phone numbers and contact details')
+{
+  const norm = async (x) => (await su(`select normalize_sa_phone($1) p`, [x])).rows[0].p
+  eq('082 123 4567 is saved as +27821234567', await norm('082 123 4567'), '+27821234567')
+  eq('+27 82 123 4567 too', await norm('+27 82 123 4567'), '+27821234567')
+  eq('27821234567 too', await norm('27821234567'), '+27821234567')
+  eq('a landline (021 555 1234) is accepted', await norm('021 555 1234'), '+27215551234')
+  eq('too short is refused', await norm('082 123'), null)
+  eq('a foreign number is refused', await norm('+44 7700 900123'), null)
+  eq('0 followed by 9 is refused (not a SA number)', await norm('0912345678'), null)
+
+  const u = await mkUser('newbie@test.za', 'client', 'New Person', '073 555 0101')
+  const prof = async () => (await su(`select email, phone from profiles where id=$1`, [u])).rows[0]
+  eq('the phone given at sign-up is saved, in the standard format', (await prof()).phone, '+27735550101')
+  const bad = await mkUser('badphone@test.za', 'client', 'Bad Phone', '12345')
+  eq('an invalid sign-up phone does not block sign-up (it is left empty)', (await su(`select phone from profiles where id=$1`, [bad])).rows[0].phone, null)
+
+  await as(user(u), `update profiles set phone='083 999 8888' where id=$1`, [u])
+  eq('the owner can change their phone, typed any way', (await prof()).phone, '+27839998888')
+  await raises('an invalid phone is refused', as(user(u), `update profiles set phone='0123' where id=$1`, [u]), /profiles_phone_format/)
+  await raises('a phone cannot be removed', as(user(u), `update profiles set phone=null where id=$1`, [u]), /cannot be removed/)
+  await raises('...or blanked', as(user(u), `update profiles set phone='  ' where id=$1`, [u]), /cannot be removed/)
+  eq('someone else cannot change it', (await as(user(c2), `update profiles set phone='0821112222' where id=$1`, [u])).affectedRows || 0, 0)
+  eq('...it is unchanged', (await prof()).phone, '+27839998888')
+  await raises('the email cannot be edited directly', as(user(u), `update profiles set email='hacker@evil.test' where id=$1`, [u]), /confirmation link/)
+  await su(`update auth.users set email='newbie.new@test.za' where id=$1`, [u])
+  eq('once a new email is confirmed, the profile follows', (await prof()).email, 'newbie.new@test.za')
+
+  // booking needs a phone
+  const d = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d])
+  await raises('a client without a phone cannot book', as(user(bad), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], d]), /add your phone number/)
+  await as(user(bad), `update profiles set phone='0761234567' where id=$1`, [bad])
+  eq('...once they add one, they can', (await as(user(bad), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], d])).rows.length, 1)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

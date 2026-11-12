@@ -246,7 +246,8 @@ export function Home() {
     }
   }
   const open = (p) => {
-    set({ photographerId: p.id, packageId: live ? null : 'signature', selected: null, date: live ? null : state.date })
+    // Live: start fresh (no leftover date or time); the date screen picks the first free time itself.
+    set({ photographerId: p.id, packageId: live ? null : 'signature', selected: null, date: live ? null : state.date, time: live ? null : state.time })
     go('profile')
   }
 

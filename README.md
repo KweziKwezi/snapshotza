@@ -162,5 +162,11 @@ Run `supabase/migrations/20261116000012_chat.sql` after 0011.
 ## Chats are deleted after 20 days (migration 13)
 Run `supabase/migrations/20261117000013_chat_retention.sql` after 0012. A message is deleted once it is 20 days old (setting `platform_settings.chat_retention_days`), by the Worker's daily job. Chats of a booking with an open problem report are kept until it is decided. Tests: `npm run test:db` (430), `npm run test:worker` (39).
 
-## Fees and refunds
-`docs/FEES_AND_REFUNDS_PROPOSAL.md` is a draft policy for the owner to edit before it is built into the app and turned into the Terms.
+## Fees, refunds, rates, strikes and date changes (migration 14)
+Run `supabase/migrations/20261118000014_final_money_policy.sql` after 0013. The policy is `docs/FEES_AND_REFUNDS_POLICY.md`.
+- Fees: 7% commission + 2.9% + R1.00 processing, both from the photographer's share. Withdrawals start at R100.
+- Checkout: the client picks **Saver** (package price, no refund, no date change) or **Flexible** (+R150, package price refunded if cancelled 48h+ ahead, one free date change the photographer approves) and ticks the terms.
+- Photographer cancels / no-show: 100% back incl. the R150 + a strike (1 warning, 2 = 30-day suspension lifted automatically, 3 = removed).
+- Disputes: client wins = unpaid share back (deposit stays); photographer wins = final; or a split by percentage. Decision due in 5 working days.
+- Refunds are due within 14 days; admins send them from **Refunds to send** and the client is notified.
+- Tests: `npm run test:db` (498 checks).

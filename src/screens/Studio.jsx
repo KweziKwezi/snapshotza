@@ -185,6 +185,14 @@ function Dashboard({ live }) {
           </p>
         </div>
 
+        {live && (
+          <button onClick={() => go('myPackages')} className="mt-3 flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left">
+            <Icon.Camera size={22} />
+            <div className="flex-1"><div className="text-[14px] font-semibold">My packages</div><div className="text-[12px] text-neutral-500">Edit prices, hours and photo counts</div></div>
+            <Icon.Chevron size={18} />
+          </button>
+        )}
+
         {!state.bank && (
           <button onClick={() => go('payouts')} className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-info p-4 text-left">
             <Icon.Bank size={22} className="text-link" />
@@ -521,6 +529,59 @@ export function OnbPackages() {
         New photographers start on Tier 1: 30% is paid within 24 hours of the shoot, and the rest after you deliver your photos.
       </Notice>
     </Onb>
+  )
+}
+
+/* ---------- My packages: edit what you offer at any time (after approval) ---------- */
+export function MyPackages() {
+  const { back, set, state, auth } = useApp()
+  const live = useLive()
+  const { busy, error, run } = useAction()
+  const [saved, setSaved] = useState(false)
+  const pk = state.studioPackages
+  const upd = (i, patch) => { setSaved(false); set({ studioPackages: pk.map((p, j) => (j === i ? { ...p, ...patch } : p)) }) }
+  const valid = pk.every((p) => p.name.trim() && p.price > 0 && p.photos > 0)
+  const sel = `${inputCls} appearance-none`
+  const save = async () => {
+    let list
+    const ok = await run(async () => { list = live ? await api.savePackages(auth.photographer.id, pk) : pk })
+    if (ok) { set({ studioPackages: list }); setSaved(true) }
+  }
+  return (
+    <Screen footer={
+      <>
+        <ErrorNote error={error} className="mb-2" />
+        {saved && <p role="status" className="mb-2 text-center text-[13px] font-semibold text-ok">Saved. New bookings use these packages.</p>}
+        <Button disabled={!valid || busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</Button>
+      </>
+    }>
+      <TopBar title="My packages" onBack={back} />
+      <div className="px-5 pb-4">
+        <p className="text-[13px] text-neutral-500">Change what you offer at any time. Bookings that are already made keep the price, hours and photo count the client was sold.</p>
+        {state.sim && (
+          <div className="mt-3 rounded-2xl bg-cream p-3.5">
+            <div className="text-[13px] font-semibold">Testing?</div>
+            <p className="mt-0.5 text-[12px] text-neutral-700">Uploading 250 photos is a hassle. Set a package to just a few edited photos, then book it as a test client. Test bookings you already have also only need the lower number.</p>
+            <button onClick={() => { setSaved(false); set({ studioPackages: pk.map((p) => ({ ...p, photos: 3 })) }) }} className="mt-2 text-[13px] font-semibold text-link">Set every package to 3 photos</button>
+          </div>
+        )}
+        <div className="mt-4 space-y-3">
+          {pk.map((p, i) => (
+            <div key={p.id} className="rounded-2xl bg-surface p-4" data-testid="package-card">
+              <div className="space-y-3">
+                <Field label="Package name"><input className={`${inputCls} bg-white`} value={p.name} maxLength={40} onChange={(e) => upd(i, { name: e.target.value })} /></Field>
+                <Field label="Price (ZAR)"><input inputMode="numeric" aria-label={`Price for ${p.name}`} className={`${inputCls} bg-white`} value={p.price ? money(p.price) : ''} onChange={(e) => upd(i, { price: Number(e.target.value.replace(/\D/g, '').slice(0, 7)) })} /></Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Shoot duration"><select className={`${sel} bg-white`} value={p.hours} onChange={(e) => upd(i, { hours: Number(e.target.value) })}>{[1, 2, 3, 4, 6, 8, 10].map((h) => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}</select></Field>
+                  <Field label="Edited photos"><input inputMode="numeric" aria-label={`Edited photos for ${p.name}`} className={`${inputCls} bg-white`} value={p.photos || ''} onChange={(e) => upd(i, { photos: Number(e.target.value.replace(/\D/g, '').slice(0, 4)) })} /></Field>
+                </div>
+                <Field label="Delivery time"><select className={`${sel} bg-white`} value={p.delivery} onChange={(e) => upd(i, { delivery: Number(e.target.value) })}>{[3, 5, 7, 10, 14].map((d) => <option key={d} value={d}>{d} days after your shoot</option>)}</select></Field>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Screen>
   )
 }
 

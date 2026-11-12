@@ -9,7 +9,7 @@ const CONCURRENCY = 2
 
 /* ---------- Photographer: upload the edited photos, then deliver ---------- */
 export function DeliveryPanel({ b, onChanged }) {
-  const need = b.numPhotos || 0
+  const [need, setNeed] = useState(b.numPhotos || 0)
   const [photos, setPhotos] = useState(null)
   const [queue, setQueue] = useState([]) // { key, name, status: 'waiting' | 'uploading' | 'failed', error }
   const [error, setError] = useState('')
@@ -25,6 +25,7 @@ export function DeliveryPanel({ b, onChanged }) {
     }
   }, [b.id])
   useEffect(() => { reload() }, [reload])
+  useEffect(() => { market.deliveryRequired(b.id, b.numPhotos || 0).then(setNeed) }, [b.id, b.numPhotos])
 
   const uploadAll = async (files) => {
     setError('')

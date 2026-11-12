@@ -10,7 +10,7 @@ import { Notifications } from './screens/Notifications.jsx'
 import { Availability } from './screens/Calendar.jsx'
 import { Earnings, StudioBookings } from './screens/Earnings.jsx'
 import { supabaseConfigured } from './lib/supabase.js'
-import { OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
+import { MyPackages, OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
 
 const SCREENS = {
   splash: Splash,
@@ -38,6 +38,7 @@ const SCREENS = {
   onbProfile: OnbProfile,
   onbPortfolio: OnbPortfolio,
   onbPackages: OnbPackages,
+  myPackages: MyPackages,
   payouts: Payouts,
   verify: Verify,
 }
@@ -56,7 +57,7 @@ const MENU = [
   ]],
   ['Photographer', [
     ['studio', 'Studio dashboard'], ['availability', 'Hours & availability', true], ['earnings', 'Earnings & withdrawals', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
-    ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
+    ['onbPackages', 'Onboarding 3 · Packages'], ['myPackages', 'My packages (edit anytime)', true], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
   ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true], ['adminPayouts', 'Payouts to send', true]]],
 ]

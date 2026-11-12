@@ -838,5 +838,37 @@ await as(svc, `select mark_gallery_purged($1)`, [dlv])
 await raises('once deleted, nobody can fetch the files', key(p2, last, 'full'), /deleted after the download period|photo not found/)
 eq('the photo rows are gone', (await su(`select count(*)::int n from photos where booking_id=$1 and not is_proof`, [dlv])).rows[0].n, 0)
 
+console.log('\n# Editing packages: bookings keep what they were sold')
+const dr = (b, who) => as(who, `select delivery_required($1) n`, [b]).then((r) => r.rows[0].n)
+{
+  const d = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d])
+  const realB = (await book(user(c1), pk2[1], d, '10:00')).rows[0]          // Signature: 100 photos
+  eq('a new booking remembers the package photo count', (await getB(realB.id)).num_photos, 100)
+  await as(svc, `select * from confirm_payment($1,'ozow',$2,$3)`, [realB.id, `REF-SNAP-${dn}`, realB.total_amount])
+  await asP2(`update packages set num_photos = 3 where id=$1`, [pk2[1]])
+  eq('a real booking still needs the original 100 after the package is edited', await dr(realB.id, user(c1)), 100)
+  eq('...as the photographer sees it too', await dr(realB.id, user(p2)), 100)
+  eq('a stranger gets nothing', await dr(realB.id, user(c2)), null)
+  const d2 = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d2])
+  const testB = (await book(user(c1), pk2[1], d2, '10:00')).rows[0]        // booked at 3 photos now
+  eq('a booking made after the edit remembers 3', (await getB(testB.id)).num_photos, 3)
+  const d3 = await dayPlus(dn++)
+  await asP2(`update packages set num_photos = 100 where id=$1`, [pk2[1]])
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d3])
+  const t3 = (await book(user(c1), pk2[1], d3, '10:00')).rows[0]
+  await as(user(c1), `select * from simulate_payment($1)`, [t3.id])
+  await asP2(`update packages set num_photos = 2 where id=$1`, [pk2[1]])
+  eq('a TEST booking only needs the lower, current count (2)', await dr(t3.id, user(p2)), 2)
+  await asP2(`update packages set num_photos = 500 where id=$1`, [pk2[1]])
+  eq('...but a raised package never raises what was sold (100)', await dr(t3.id, user(p2)), 100)
+  await su(`update platform_settings set simulate_payments=false`)
+  await asP2(`update packages set num_photos = 2 where id=$1`, [pk2[1]])
+  eq('with test mode off, even a test booking needs what was sold', await dr(t3.id, user(p2)), 100)
+  await su(`update platform_settings set simulate_payments=true`)
+  await asP2(`update packages set num_photos = 100 where id=$1`, [pk2[1]])
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

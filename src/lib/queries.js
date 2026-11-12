@@ -57,5 +57,6 @@ export const APP_RPCS = [
   ['admin_resolve_dispute', { p_dispute: NIL, p_outcome: 'dismiss', p_note: 'check' }],
   ['simulate_delivery', { p_booking: NIL }],
   ['deliver_gallery', { p_booking: NIL }],
+  ['delivery_required', { p_booking: NIL }],
   ['admin_complete_payout', { p_payout: NIL, p_bank_reference: 'check' }],
 ]

@@ -447,3 +447,9 @@ export async function downloadPhoto(photoId, name = 'photo.jpg') {
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 30000)
 }
+
+/** How many edited photos this booking needs before it can be delivered (the database decides; test bookings may need fewer). */
+export async function deliveryRequired(bookingId, fallback = 0) {
+  const res = await supabase.rpc('delivery_required', { p_booking: bookingId })
+  return res.error || res.data == null ? fallback : Number(res.data)
+}

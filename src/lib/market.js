@@ -7,6 +7,14 @@ const must = ({ error }, fallback) => {
 
 /** 'YYYY-MM-DD' without any timezone conversion (m is 0-based). */
 export const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+const hm = (t) => (t ? String(t).slice(0, 5) : null)
+
+/* ---------------------------------------------------------- test mode */
+/** True while payments/payouts are simulated (platform_settings.simulate_payments). Defaults to false if unreadable. */
+export async function getTestMode() {
+  const res = await supabase.from('platform_settings').select('simulate_payments').maybeSingle()
+  return Boolean(res.data?.simulate_payments)
+}
 
 /* ---------------------------------------------------------- browsing */
 /** A row of public_photographers, in the shape the screens use. */
@@ -48,7 +56,7 @@ export async function loadPhotographer(id) {
   if (!p.data) throw new Error('This photographer is not available right now.')
   return {
     p: toCard(p.data),
-    portfolio: (photos.data || []).map((x) => ({ id: x.id, src: x.thumbnail_url || x.url })),
+    portfolio: (photos.data || []).map((x) => ({ id: x.id, src: x.thumbnail_url || x.url, full: x.url })),
     packages: (packages.data || []).map((k) => ({
       id: k.id, name: k.name, price: Number(k.price_zar), hours: k.duration_hours, photos: k.num_photos, delivery: k.delivery_days, popular: k.is_popular,
     })),
@@ -71,18 +79,26 @@ export async function setFavorite(userId, photographerId, on) {
 }
 
 /* ---------------------------------------------- client: dates & booking */
-/** Open days of an approved photographer in a range: { 'YYYY-MM-DD': isBooked }. */
-export async function getAvailability(photographerId, from, to) {
-  const res = await supabase.rpc('get_availability', { p_photographer: photographerId, p_from: from, p_to: to })
+/** Open future days of an approved photographer: { 'YYYY-MM-DD': number of free start times for a shoot of `hours` }. */
+export async function getOpenDays(photographerId, from, to, hours) {
+  const res = await supabase.rpc('get_open_days', { p_photographer: photographerId, p_from: from, p_to: to, p_hours: hours })
   must(res, 'Could not load the calendar.')
   const out = {}
-  for (const r of res.data || []) out[r.day] = Boolean(r.is_booked)
+  for (const r of res.data || []) out[r.day] = r.free_slots
   return out
+}
+
+/** Start times ('HH:MM') still free on a day, honouring working hours and the gap between shoots. */
+export async function getFreeSlots(photographerId, day, hours) {
+  const res = await supabase.rpc('get_free_slots', { p_photographer: photographerId, p_day: day, p_hours: hours })
+  must(res, 'Could not load the available times.')
+  return (res.data || []).map(hm)
 }
 
 const BOOKING_MESSAGES = [
   ['only clients can make bookings', 'Only client accounts can book. Sign out and use a client account to book a photographer.'],
-  ['already booked', 'Someone just booked that time. Please pick another time or date.'],
+  ['already booked', 'Someone just booked around that time. Please pick another time or date.'],
+  ['outside the photographer', 'That time is outside the photographer’s working hours. Please pick another time.'],
   ['not available on this date', 'That date was just taken or closed. Please pick another date.'],
   ['in the future', 'Please pick a date and time in the future.'],
   ['package not available', 'That package is no longer available.'],
@@ -104,11 +120,14 @@ export async function createBooking({ packageId, date, time, gateway }) {
 export async function cancelBooking(bookingId, reason = '') {
   must(await supabase.rpc('cancel_booking', { p_booking: bookingId, p_reason: reason }), 'Could not cancel the booking.')
 }
+export async function approveGallery(bookingId) {
+  must(await supabase.rpc('approve_gallery', { p_booking: bookingId }), 'Could not approve the photos.')
+}
 
 /** The signed-in client's bookings, with the photographer and package names filled in. */
 export async function myBookings(userId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, total_amount, created_at, photographer_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
     .eq('client_id', userId).order('created_at', { ascending: false }).limit(50)
   must(res, 'Could not load your bookings.')
   const rows = res.data || []
@@ -124,21 +143,111 @@ export async function myBookings(userId) {
   return rows.map((r) => ({ ...r, photographerName: pm[r.photographer_id]?.full_name || 'Photographer', packageName: km[r.package_id]?.name || 'Package' }))
 }
 
-/* ----------------------------------- photographer: which days are open */
+/* ---------------------------------------------------- TEST MODE actions */
+export async function simulatePayment(bookingId) {
+  const res = await supabase.rpc('simulate_payment', { p_booking: bookingId })
+  must(res, 'Could not complete the test payment.')
+  return res.data
+}
+export async function simulateShootDone(bookingId) {
+  must(await supabase.rpc('simulate_shoot_done', { p_booking: bookingId }), 'Could not fast-forward the shoot.')
+}
+export async function simulateDelivery(bookingId) {
+  must(await supabase.rpc('simulate_delivery', { p_booking: bookingId }), 'Could not mark the photos as delivered.')
+}
+
+/* ----------------------------------------------- photographer: bookings */
+/** Bookings a photographer has received (paid or later), newest shoot first, with client and package names. */
+export async function studioBookings(photographerId) {
+  const res = await supabase.from('bookings')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id')
+    .eq('photographer_id', photographerId)
+    .in('status', ['confirmed', 'in_progress', 'gallery_uploaded', 'completed', 'disputed'])
+    .order('shoot_starts_at', { ascending: false }).limit(50)
+  must(res, 'Could not load your bookings.')
+  const rows = res.data || []
+  if (!rows.length) return []
+  const cids = [...new Set(rows.map((r) => r.client_id))]
+  const kids = [...new Set(rows.map((r) => r.package_id))]
+  const [clients, packs] = await Promise.all([
+    supabase.from('profiles').select('id, full_name').in('id', cids),       // visible once a booking is paid
+    supabase.from('packages').select('id, name').in('id', kids),
+  ])
+  const cm = Object.fromEntries((clients.data || []).map((x) => [x.id, x]))
+  const km = Object.fromEntries((packs.data || []).map((x) => [x.id, x]))
+  return rows.map((r) => ({
+    ...r,
+    clientName: cm[r.client_id]?.full_name || 'Client',
+    packageName: km[r.package_id]?.name || 'Package',
+    net: Number(r.total_amount) - Number(r.platform_fee) - Number(r.transaction_fee),
+  }))
+}
+
+/* ----------------------------------------------- photographer: earnings */
+export async function myEarnings() {
+  const res = await supabase.rpc('my_earnings')
+  must(res, 'Could not load your earnings.')
+  const r = (Array.isArray(res.data) ? res.data[0] : res.data) || {}
+  const n = (v) => Number(v) || 0
+  return { available: n(r.available), processing: n(r.processing), paidOut: n(r.paid_out), inEscrow: n(r.in_escrow), thisMonth: n(r.earned_this_month) }
+}
+
+export async function payoutHistory() {
+  const res = await supabase.from('payouts')
+    .select('id, booking_id, amount, type, status, bank_reference, created_at, completed_at, simulated')
+    .order('created_at', { ascending: false }).limit(50)
+  must(res, 'Could not load your payouts.')
+  const rows = res.data || []
+  if (!rows.length) return []
+  const ids = [...new Set(rows.map((r) => r.booking_id))]
+  const refs = await supabase.from('bookings').select('id, booking_ref').in('id', ids)
+  const rm = Object.fromEntries((refs.data || []).map((x) => [x.id, x.booking_ref]))
+  return rows.map((r) => ({ ...r, amount: Number(r.amount), bookingRef: rm[r.booking_id] || '' }))
+}
+
+export async function requestWithdrawal() {
+  const res = await supabase.rpc('request_withdrawal')
+  must(res, 'Could not start the withdrawal.')
+  const r = (Array.isArray(res.data) ? res.data[0] : res.data) || {}
+  return { total: Number(r.r_total) || 0, count: r.r_count || 0, reference: r.r_reference || null, completed: Boolean(r.r_completed) }
+}
+
+/* ----------------------------------- photographer: hours and open days */
+export async function loadMyHours(photographerId) {
+  const res = await supabase.from('photographer_profiles').select('work_start, work_end').eq('id', photographerId).maybeSingle()
+  must(res, 'Could not load your hours.')
+  return { start: hm(res.data?.work_start) || '08:00', end: hm(res.data?.work_end) || '18:00' }
+}
+export async function saveMyHours(photographerId, start, end) {
+  must(await supabase.from('photographer_profiles').update({ work_start: start, work_end: end }).eq('id', photographerId), 'Could not save your hours.')
+}
+
+/** For the visible month: open days (Map day -> {start,end} override or null) and bookings per day (Map day -> count). */
 export async function loadMyCalendar(photographerId, from, to) {
   const [open, booked] = await Promise.all([
-    supabase.from('availability').select('day').eq('photographer_id', photographerId).eq('is_open', true).gte('day', from).lte('day', to),
+    supabase.from('availability').select('day, start_time, end_time').eq('photographer_id', photographerId).eq('is_open', true).gte('day', from).lte('day', to),
     supabase.from('bookings').select('shoot_date').eq('photographer_id', photographerId)
       .in('status', ['confirmed', 'in_progress', 'gallery_uploaded', 'disputed']).gte('shoot_date', from).lte('shoot_date', to),
   ])
   must(open, 'Could not load your calendar.')
-  return { open: new Set((open.data || []).map((r) => r.day)), booked: new Set((booked.data || []).map((r) => r.shoot_date)) }
+  const hours = new Map((open.data || []).map((r) => [r.day, r.start_time ? { start: hm(r.start_time), end: hm(r.end_time) } : null]))
+  const counts = new Map()
+  for (const r of booked.data || []) counts.set(r.shoot_date, (counts.get(r.shoot_date) || 0) + 1)
+  return { open: hours, booked: counts }
 }
 export async function setDays(photographerId, days, on) {
   if (!days.length) return
   if (on) {
+    // Only the columns we send are updated, so a day that already has custom hours keeps them.
     must(await supabase.from('availability').upsert(days.map((day) => ({ photographer_id: photographerId, day, is_open: true })), { onConflict: 'photographer_id,day' }))
   } else {
     must(await supabase.from('availability').delete().eq('photographer_id', photographerId).in('day', days))
   }
+}
+/** Custom hours for one open day. Pass null/null to go back to the usual hours. */
+export async function setDayHours(photographerId, day, start, end) {
+  must(await supabase.from('availability').upsert(
+    { photographer_id: photographerId, day, is_open: true, start_time: start || null, end_time: end || null },
+    { onConflict: 'photographer_id,day' },
+  ), 'Could not save the hours for that day.')
 }

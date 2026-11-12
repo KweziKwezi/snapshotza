@@ -24,12 +24,23 @@ export const APP_SELECTS = [
   ['public_photographers', '*'],
   ['reviews', 'id, rating, comment, created_at'],
   ['favorites', 'photographer_id'],
-  ['availability', 'day'],
+  ['availability', 'day, start_time, end_time'],
+  ['photographer_profiles', 'work_start, work_end'],
+  ['platform_settings', 'simulate_payments'],
   ['bookings', 'shoot_date'],
-  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, total_amount, created_at, photographer_id, package_id'],
+  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id'],
+  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id'],
+  ['payouts', 'id, booking_id, amount, type, status, bank_reference, created_at, completed_at, simulated'],
 ]
 
 /** Database functions the app calls (name, arguments). Sent anonymously; a harmless "not allowed" answer is fine. */
+const NIL = '00000000-0000-0000-0000-000000000000'
 export const APP_RPCS = [
-  ['get_availability', { p_photographer: '00000000-0000-0000-0000-000000000000', p_from: '2026-01-01', p_to: '2026-01-31' }],
+  ['get_open_days', { p_photographer: NIL, p_from: '2026-01-01', p_to: '2026-01-31', p_hours: 2 }],
+  ['get_free_slots', { p_photographer: NIL, p_day: '2026-01-05', p_hours: 2 }],
+  ['my_earnings', {}],
+  ['request_withdrawal', {}],
+  ['simulate_payment', { p_booking: NIL }],
+  ['simulate_shoot_done', { p_booking: NIL }],
+  ['simulate_delivery', { p_booking: NIL }],
 ]

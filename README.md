@@ -54,7 +54,7 @@ Verification is now step 5 of 5.
 npm run test:db
 ```
 Loads migrations 1-3 into an in-process Postgres (PGlite) with a stub of Supabase's `auth` schema and roles, then
-runs the full lifecycle as different users (241 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
+runs the full lifecycle as different users (309 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
 tiers, the review window, auto-promotion, all cancellation cases, disputes, and that each role can only see and do what it should.
 Migration 4 (storage, pg_cron) needs real Supabase and is **not** covered by this test.
 
@@ -107,3 +107,14 @@ The home screen, search/filters, photographer profile (portfolio, packages, revi
 Photographers open their days under Studio -> Set your available days; clients can only book open days. Reserving a date
 creates a real `pending` booking (the database holds the slot for 30 minutes); payment is connected in the next step.
 Run `20261111000007_listing_thumbnails.sql` in the Supabase SQL Editor (home grid loads small thumbnails).
+
+## Working hours, the gap between shoots, and TEST MODE
+- Photographers set **usual hours** (default 08:00-18:00) and can override the hours for any single day (Studio -> Set your available days).
+  Clients pick from the start times that are actually free: inside the hours and at least **one hour** (setting `booking_buffer_minutes`)
+  clear of other shoots that day. The database enforces this, not just the app.
+- **TEST MODE** (`platform_settings.simulate_payments`, on by default): clients can "Pay (test)", photographers can fast-forward a test
+  shoot, mark test photos delivered, see earnings and withdraw. Test mode only acts on bookings that were paid with a *simulated* payment,
+  so it can never move real money, and everything it creates is flagged `simulated`.
+  **Before launch:** `update public.platform_settings set simulate_payments = false;` and delete test data
+  (`delete from bookings where simulated;` after clearing dependent rows, or reset the project).
+- Run `20261112000008_hours_and_test_mode.sql` in the Supabase SQL Editor **before** using the new app version.

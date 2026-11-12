@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /* ---------- Icons ---------- */
 const I = ({ children, size = 20, className = '', fill = 'none', sw = 1.8 }) => (
@@ -22,6 +22,7 @@ export const Icon = {
   Calendar: (p) => <I {...p}><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4" /></I>,
   User: (p) => <I {...p}><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0115 0" /></I>,
   Plus: (p) => <I {...p}><path d="M12 5v14M5 12h14" /></I>,
+  Close: (p) => <I {...p}><path d="M6 6l12 12M18 6L6 18" /></I>,
   Camera: (p) => <I {...p}><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></I>,
   IdCard: (p) => <I {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6.5 16c.5-1.6 1.6-2.3 2.5-2.3s2 .7 2.5 2.3M14 10h4M14 13h3" /></I>,
   Bank: (p) => <I {...p}><path d="M3 9l9-5 9 5M5 9v8M9.5 9v8M14.5 9v8M19 9v8M3 20h18" /></I>,
@@ -181,7 +182,6 @@ export function Checkbox({ checked, onChange, children }) {
 /* ---------- Bottom nav ---------- */
 const TABS = [
   { id: 'home', label: 'Home', icon: Icon.Home },
-  { id: 'search', label: 'Search', icon: Icon.Search },
   { id: 'messages', label: 'Messages', icon: Icon.Message },
   { id: 'bookings', label: 'Bookings', icon: Icon.Calendar },
   { id: 'profile', label: 'Profile', icon: Icon.User },
@@ -202,5 +202,85 @@ export function BottomNav({ active, onSelect }) {
         )
       })}
     </nav>
+  )
+}
+
+/* ---------- Full-screen photo viewer ---------- */
+// photos: [{ id, src (small), full (large), tone }]. Swipe, arrow keys or the buttons to move; Esc or X to close.
+export function Lightbox({ photos, index, onClose, onIndex }) {
+  const count = photos.length
+  const touch = useRef(null)
+  const [loaded, setLoaded] = useState(false)
+  const step = useCallback((d) => onIndex((index + d + count) % count), [index, count, onIndex])
+  const photo = photos[index]
+
+  useEffect(() => { setLoaded(false) }, [index])
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowRight') step(1)
+      else if (e.key === 'ArrowLeft') step(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [onClose, step])
+  // Warm the cache for the neighbours so swiping feels instant.
+  useEffect(() => {
+    for (const d of [1, -1]) {
+      const n = photos[(index + d + count) % count]
+      if (n?.full) { const im = new Image(); im.src = n.full }
+    }
+  }, [index, count, photos])
+
+  const onTouchStart = (e) => { touch.current = e.touches[0].clientX }
+  const onTouchEnd = (e) => {
+    if (touch.current == null) return
+    const dx = e.changedTouches[0].clientX - touch.current
+    touch.current = null
+    if (Math.abs(dx) > 50 && count > 1) step(dx < 0 ? 1 : -1)
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Photo ${index + 1} of ${count}`}
+      className="fixed inset-0 z-50 flex flex-col bg-black text-white"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-[13px] font-medium text-white/80" aria-live="polite">{index + 1} / {count}</span>
+        <button onClick={onClose} aria-label="Close" autoFocus className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+          <Icon.Close size={20} />
+        </button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+        {photo.full || photo.src ? (
+          <>
+            {/* the small version shows instantly, the large one fades in over it */}
+            {photo.src && <img src={photo.src} alt="" aria-hidden="true" className="absolute max-h-full max-w-full object-contain blur-sm" />}
+            <img
+              key={photo.id}
+              src={photo.full || photo.src}
+              alt={`Portfolio photo ${index + 1}`}
+              onLoad={() => setLoaded(true)}
+              className={`relative max-h-full max-w-full object-contain transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            />
+          </>
+        ) : (
+          <Photo tone={photo.tone} className="h-[60vh] w-full max-w-md" />
+        )}
+        {count > 1 && (
+          <>
+            <button onClick={() => step(-1)} aria-label="Previous photo" className="absolute left-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50"><Icon.ChevronL size={22} /></button>
+            <button onClick={() => step(1)} aria-label="Next photo" className="absolute right-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50"><Icon.Chevron size={22} /></button>
+          </>
+        )}
+      </div>
+      <div className="px-4 pb-4 pt-2 text-center text-[11px] text-white/50">{count > 1 ? 'Swipe or use the arrows' : ' '}</div>
+    </div>
   )
 }

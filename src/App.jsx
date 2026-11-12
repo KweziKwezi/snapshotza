@@ -7,6 +7,8 @@ import {
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
 import { AdminList, AdminReview } from './screens/Admin.jsx'
 import { Availability } from './screens/Calendar.jsx'
+import { Earnings, StudioBookings } from './screens/Earnings.jsx'
+import { supabaseConfigured } from './lib/supabase.js'
 import { OnbPackages, OnbPortfolio, OnbProfile, Payouts, Studio, Verify } from './screens/Studio.jsx'
 
 const SCREENS = {
@@ -14,6 +16,7 @@ const SCREENS = {
   auth: Auth,
   account: Account,
   availability: Availability,
+  earnings: Earnings,
   adminList: AdminList,
   adminReview: AdminReview,
   home: Home,
@@ -24,7 +27,7 @@ const SCREENS = {
   protection: Protection,
   gateway: Gateway,
   confirmed: Confirmed,
-  bookings: Bookings,
+  bookings: BookingsRoute,
   chat: Chat,
   studio: Studio,
   onbProfile: OnbProfile,
@@ -34,6 +37,12 @@ const SCREENS = {
   verify: Verify,
 }
 
+// Clients see their own bookings; photographers see the bookings they have received.
+function BookingsRoute() {
+  const { auth } = useApp()
+  return auth.status === 'in' && auth.profile?.role === 'photographer' ? <StudioBookings /> : <Bookings />
+}
+
 const MENU = [
   ['Client', [
     ['splash', 'Welcome'], ['auth', 'Sign in / sign up', true], ['account', 'Account', true], ['home', 'Home'], ['profile', 'Photographer profile'], ['date', 'Choose date'],
@@ -41,7 +50,7 @@ const MENU = [
     ['gateway', 'Gateway hand-off (mock)', true], ['confirmed', 'Booking confirmed'], ['bookings', 'My bookings & escrow', true], ['chat', 'Chat'],
   ]],
   ['Photographer', [
-    ['studio', 'Studio dashboard'], ['availability', 'Availability calendar', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
+    ['studio', 'Studio dashboard'], ['availability', 'Hours & availability', true], ['earnings', 'Earnings & withdrawals', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
   ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true]]],
@@ -60,7 +69,7 @@ function Booting() {
 }
 
 function Shell() {
-  const { screen, jump, auth } = useApp()
+  const { screen, jump, auth, state } = useApp()
 
   // The app always starts on the welcome screen (page load, refresh, or the link in a confirmation email).
   // A signed-in person should never be left there: send them to their own home instead.
@@ -75,6 +84,11 @@ function Shell() {
     // Real app: full screen on phones, a centered mobile-width column on larger screens.
     return (
       <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-white md:shadow-[0_0_40px_rgba(0,0,0,0.12)]">
+        {supabaseConfigured && state.sim && (
+          <div role="status" className="shrink-0 bg-brand px-3 py-1 text-center text-[11px] font-bold tracking-wide text-ink">
+            TEST MODE · payments and payouts are simulated
+          </div>
+        )}
         <div className="min-h-0 flex-1" key={screen}>
           <Current />
         </div>

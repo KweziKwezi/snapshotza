@@ -4,10 +4,10 @@ import { supabaseConfigured } from '../lib/supabase.js'
 import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
 import {
-  Avatar, BottomNav, Button, Checkbox, H1, Icon, Notice, Photo, Screen, Stepper, TopBar, initials,
+  Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
 import {
-  CATEGORIES, DAYS_SHORT, GALLERY_RETENTION_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, TIMES, isAvailable, money, packagesFor,
+  CATEGORIES, DAYS_SHORT, GALLERY_RETENTION_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, SPECIALTIES, TIMES, isAvailable, money, packagesFor,
 } from '../data.js'
 
 /* ---------- helpers ---------- */
@@ -32,7 +32,7 @@ const endTime = (time, hours) => {
   return `${String((h + hours) % 24).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }
 
-const NAV_TARGET = { home: 'home', search: 'home', messages: 'chat', bookings: 'bookings' }
+const NAV_TARGET = { home: 'home', messages: 'chat', bookings: 'bookings' }
 export function AppNav({ active }) {
   const { jump, auth, set } = useApp()
   const onSelect = (id) => {
@@ -81,6 +81,123 @@ export function Splash() {
         </p>
       </div>
     </Screen>
+  )
+}
+
+/* ---------- Search with suggestions (places, styles, photographers) ---------- */
+const firstPart = (loc) => (loc || '').split(',')[0].trim()
+const KIND_ORDER = ['place', 'style', 'person']
+
+function buildSuggestions(items, q) {
+  const needle = q.trim().toLowerCase()
+  if (!needle || !items?.length) return []
+  const rank = (label) => {
+    const l = label.toLowerCase()
+    if (l.startsWith(needle)) return 0
+    if (l.split(/[\s,-]+/).some((w) => w.startsWith(needle))) return 1
+    return l.includes(needle) ? 2 : -1
+  }
+  const out = []
+  const places = new Map()                       // "Cape Town, Western Cape" and "Cape Town" are one place
+  for (const p of items) {
+    const c = firstPart(p.city)
+    if (!c) continue
+    const k = c.toLowerCase()
+    places.set(k, { label: places.get(k)?.label || c, n: (places.get(k)?.n || 0) + 1 })
+  }
+  for (const { label, n } of places.values()) {
+    const r = rank(label)
+    if (r >= 0) out.push({ kind: 'place', label, sub: `${n} photographer${n === 1 ? '' : 's'}`, r })
+  }
+  for (const c of SPECIALTIES) {
+    const r = rank(c)
+    if (r >= 0 && items.some((p) => (p.specialties || [p.style]).includes(c))) out.push({ kind: 'style', label: c, sub: 'Style', r })
+  }
+  for (const p of items) {
+    const r = rank(p.name)
+    if (r >= 0) out.push({ kind: 'person', label: p.name, sub: p.city || p.style, r, p })
+  }
+  return out
+    .sort((a, b) => a.r - b.r || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.label.localeCompare(b.label))
+    .slice(0, 7)
+}
+
+function Highlight({ text, needle }) {
+  const i = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1
+  if (i < 0) return text
+  return <>{text.slice(0, i)}<b className="font-bold">{text.slice(i, i + needle.length)}</b>{text.slice(i + needle.length)}</>
+}
+
+function SearchBox({ q, setQ, items, onPlace, onStyle, onPerson }) {
+  const [focused, setFocused] = useState(false)
+  const [active, setActive] = useState(-1)
+  const list = useMemo(() => buildSuggestions(items, q), [items, q])
+  const open = focused && list.length > 0
+  useEffect(() => { setActive(-1) }, [q])
+  const pick = (s) => {
+    setFocused(false)
+    if (s.kind === 'place') onPlace(s.label)
+    else if (s.kind === 'style') onStyle(s.label)
+    else onPerson(s.p)
+  }
+  const onKeyDown = (e) => {
+    if (!open) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => (a + 1) % list.length) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => (a <= 0 ? list.length - 1 : a - 1)) }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(list[active >= 0 ? active : 0]) }
+    else if (e.key === 'Escape') setFocused(false)
+  }
+  const KindIcon = { place: Icon.Pin, style: Icon.Camera, person: Icon.User }
+  return (
+    <div className="relative mt-5">
+      <label className="flex h-12 items-center gap-3 rounded-2xl bg-surface px-4">
+        <Icon.Search size={18} className="text-neutral-500" />
+        <input
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="search-suggestions"
+          aria-autocomplete="list"
+          aria-activedescendant={active >= 0 ? `sug-${active}` : undefined}
+          aria-label="Search photographers, places or styles"
+          autoComplete="off"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setFocused(true) }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={onKeyDown}
+          placeholder="Photographer, location or style"
+          className="w-full bg-transparent text-[14px] outline-none placeholder:text-neutral-400"
+        />
+        {q && (
+          <button type="button" aria-label="Clear search" onPointerDown={(e) => e.preventDefault()} onClick={() => setQ('')} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-300 text-white">
+            <Icon.Close size={13} />
+          </button>
+        )}
+      </label>
+      {open && (
+        <ul id="search-suggestions" role="listbox" className="absolute inset-x-0 top-[54px] z-30 overflow-hidden rounded-2xl bg-white py-1 shadow-[0_8px_30px_rgba(0,0,0,0.16)] ring-1 ring-black/5">
+          {list.map((s, i) => {
+            const K = KindIcon[s.kind]
+            return (
+              <li key={`${s.kind}-${s.label}`} id={`sug-${i}`} role="option" aria-selected={i === active}>
+                <button
+                  type="button"
+                  onPointerDown={(e) => { e.preventDefault(); pick(s) }}
+                  onMouseEnter={() => setActive(i)}
+                  className={`flex w-full items-center gap-3 px-4 py-2.5 text-left ${i === active ? 'bg-surface' : ''}`}
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface text-neutral-600"><K size={16} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px]"><Highlight text={s.label} needle={q.trim()} /></span>
+                    <span className="block truncate text-[11.5px] text-neutral-500">{s.sub}</span>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -152,15 +269,14 @@ export function Home() {
           Their magic.
         </H1>
 
-        <label className="mt-5 flex h-12 items-center gap-3 rounded-2xl bg-surface px-4">
-          <Icon.Search size={18} className="text-neutral-500" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Photographer, location or style"
-            className="w-full bg-transparent text-[14px] outline-none placeholder:text-neutral-400"
-          />
-        </label>
+        <SearchBox
+          q={q}
+          setQ={setQ}
+          items={items}
+          onPlace={(label) => { setQ(label); setCat('All') }}
+          onStyle={(c) => { setCat(c); setQ('') }}
+          onPerson={open}
+        />
 
         <div className="scroll-hide -mx-5 mt-4 flex gap-2 overflow-x-auto px-5">
           {CATEGORIES.map((c) => (
@@ -226,6 +342,8 @@ export function Profile() {
   const live = supabaseConfigured
   const { p, packages } = usePhotographer()
   const [error, setError] = useState('')
+  const [showAll, setShowAll] = useState(false)
+  const [lb, setLb] = useState(null)             // index of the photo open full screen
   const loaded = !live || state.selected?.p.id === state.photographerId
 
   useEffect(() => {
@@ -261,7 +379,8 @@ export function Profile() {
     )
   }
 
-  const portfolio = live ? state.selected.portfolio.slice(0, 6) : [1, 2, 3].map((n, i) => ({ id: n, src: `/photos/wedding-${n}.jpg`, tone: ['green', 'dusk', 'cream'][i] }))
+  const all = live ? state.selected.portfolio : [1, 2, 3].map((n, i) => ({ id: n, src: `/photos/wedding-${n}.jpg`, full: `/photos/wedding-${n}.jpg`, tone: ['green', 'dusk', 'cream'][i] }))
+  const visible = showAll ? all : all.slice(0, 6)
   const reviews = live ? state.selected.reviews : []
   const canBook = packages.length > 0 && Boolean(state.packageId)
 
@@ -295,16 +414,27 @@ export function Profile() {
         </div>
         {p.bio && <p className="mt-3 text-[13px] leading-relaxed text-neutral-600">{p.bio}</p>}
 
-        {portfolio.length > 0 && (
+        {all.length > 0 && (
           <>
-            <h2 className="mb-3 mt-6 font-display text-[17px] font-bold">A little of my magic</h2>
+            <div className="mb-3 mt-6 flex items-end justify-between">
+              <h2 className="font-display text-[17px] font-bold">A little of my magic</h2>
+              <span className="text-[12px] text-neutral-500">{all.length} photo{all.length === 1 ? '' : 's'}</span>
+            </div>
             <div className="grid grid-cols-3 gap-2">
-              {portfolio.map((ph, i) => (
-                <Photo key={ph.id} src={ph.src} tone={ph.tone || ['green', 'dusk', 'cream'][i % 3]} className="h-[100px] rounded-xl" />
+              {visible.map((ph, i) => (
+                <button key={ph.id} onClick={() => setLb(i)} aria-label={`Open photo ${i + 1} of ${all.length}`} className="block overflow-hidden rounded-xl">
+                  <Photo src={ph.src} tone={ph.tone || ['green', 'dusk', 'cream'][i % 3]} className="h-[100px] w-full" />
+                </button>
               ))}
             </div>
+            {all.length > 6 && (
+              <button onClick={() => setShowAll((v) => !v)} className="mt-3 w-full text-center text-[13px] font-semibold text-link">
+                {showAll ? 'Show fewer' : `Show all ${all.length} photos`}
+              </button>
+            )}
           </>
         )}
+        {lb !== null && <Lightbox photos={all} index={lb} onIndex={setLb} onClose={() => setLb(null)} />}
 
         <h2 className="mt-6 font-display text-[17px] font-bold">Choose your package</h2>
         <p className="mb-3 text-[12px] text-neutral-500">All packages include a private online gallery.</p>
@@ -385,21 +515,39 @@ export function ChooseDate() {
     let off = false
     setAvail(null)
     setLoadErr('')
-    market.getAvailability(state.photographerId, market.ymd(view.y, view.m, 1), market.ymd(view.y, view.m, days))
+    market.getOpenDays(state.photographerId, market.ymd(view.y, view.m, 1), market.ymd(view.y, view.m, days), pkg.hours)
       .then((d) => { if (!off) setAvail(d) })
       .catch((e) => { if (!off) { setLoadErr(explain(e)); setAvail({}) } })
     return () => { off = true }
-  }, [live, state.photographerId, view.y, view.m, days])
+  }, [live, state.photographerId, view.y, view.m, days, pkg.hours])
 
   const isPast = (d) => view.y < now.y || (view.y === now.y && (view.m < now.m || (view.m === now.m && d <= now.d)))
   const dayOk = (d) => {
     if (!live) return isAvailable(view.y, view.m, d)
     const key = market.ymd(view.y, view.m, d)
-    return Boolean(avail) && avail[key] === false && !isPast(d)
+    return Boolean(avail) && (avail[key] || 0) > 0 && !isPast(d)
   }
   const anyOpen = live && avail && cells.some((d) => d && dayOk(d))
   const selected = state.date
-  const hasSel = Boolean(selected) && (live || isAvailable(selected.y, selected.m, selected.d))
+  // Live: the start times still free on the chosen day (inside the photographer's hours, with a gap between shoots).
+  const selKey = live && selected ? market.ymd(selected.y, selected.m, selected.d) : null
+  const [slots, setSlots] = useState(null)
+  const [slotErr, setSlotErr] = useState('')
+  useEffect(() => {
+    if (!live || !selKey) { setSlots(null); return undefined }
+    let off = false
+    setSlots(null)
+    setSlotErr('')
+    market.getFreeSlots(state.photographerId, selKey, pkg.hours)
+      .then((list) => {
+        if (off) return
+        setSlots(list)
+        set((st) => ({ time: list.includes(st.time) ? st.time : list[0] || null }))
+      })
+      .catch((e) => { if (!off) { setSlotErr(explain(e)); setSlots([]) } })
+    return () => { off = true }
+  }, [live, selKey, state.photographerId, pkg.hours, set])
+  const hasSel = Boolean(selected) && (live ? Boolean(state.time) && Array.isArray(slots) && slots.includes(state.time) : isAvailable(selected.y, selected.m, selected.d))
   const monthIndex = view.y * 12 + view.m
   const canPrev = live ? monthIndex > now.y * 12 + now.m : view.y > 2026 || view.m > 10
   const canNext = live ? monthIndex < now.y * 12 + now.m + 12 : true
@@ -460,18 +608,45 @@ export function ChooseDate() {
         {live && avail && !anyOpen && !loadErr && <p className="mt-3 rounded-xl bg-surface p-3 text-[13px] text-neutral-600">No open dates this month. Try the next month.</p>}
         {loadErr && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{loadErr}</p>}
 
-        <h2 className="mb-3 mt-6 font-display text-[17px] font-bold">Start time</h2>
-        <div className="flex gap-3 pb-4">
-          {TIMES.map((t) => (
-            <button
-              key={t}
-              onClick={() => set({ time: t })}
-              className={`h-12 flex-1 rounded-2xl text-[14px] font-medium ${state.time === t ? 'bg-ink text-white' : 'bg-surface'}`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+        <h2 className="mb-1 mt-6 font-display text-[17px] font-bold">Start time</h2>
+        {live ? (
+          <div className="pb-4">
+            <p className="mb-3 text-[12px] text-neutral-500">
+              {pkg.hours}-hour shoot · there’s always a one-hour gap between shoots.
+            </p>
+            {!selected && <p className="rounded-xl bg-surface p-3 text-[13px] text-neutral-600">Pick a date to see the times available.</p>}
+            {selected && slots === null && !slotErr && <p className="text-[12px] text-neutral-500">Checking times…</p>}
+            {slotErr && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{slotErr}</p>}
+            {slots && slots.length === 0 && !slotErr && <p className="rounded-xl bg-surface p-3 text-[13px] text-neutral-600">No free times that day. Try another date.</p>}
+            {slots && slots.length > 0 && (
+              <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Start time">
+                {slots.map((t) => (
+                  <button
+                    key={t}
+                    role="radio"
+                    aria-checked={state.time === t}
+                    onClick={() => set({ time: t })}
+                    className={`h-11 rounded-xl text-[13px] font-medium ${state.time === t ? 'bg-ink text-white' : 'bg-surface'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-3 pb-4">
+            {TIMES.map((t) => (
+              <button
+                key={t}
+                onClick={() => set({ time: t })}
+                className={`h-12 flex-1 rounded-2xl text-[14px] font-medium ${state.time === t ? 'bg-ink text-white' : 'bg-surface'}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </Screen>
   )
@@ -508,7 +683,7 @@ export function Review() {
         <>
           {error && <p role="alert" className="mb-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
           <Button disabled={!agree || busy || !state.date} onClick={pay}>
-            {busy ? 'Reserving…' : needsAccount ? 'Sign in to continue' : supabaseConfigured ? 'Reserve this date' : `Pay ${money(total)} securely`}
+            {busy ? 'Reserving…' : needsAccount ? 'Sign in to continue' : supabaseConfigured ? (state.sim ? 'Reserve & continue' : 'Reserve this date') : `Pay ${money(total)} securely`}
           </Button>
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-neutral-500"><Icon.Lock size={12} /> Encrypted & secure</div>
         </>
@@ -542,8 +717,10 @@ export function Review() {
         </div>
 
         {supabaseConfigured && (
-          <Notice tone="cream" className="mb-4" icon={<Icon.Calendar size={18} />} title="Online payment is being connected">
-            You can reserve this date now. We hold it for 30 minutes. Payment with Ozow and PayFast switches on shortly.
+          <Notice tone="cream" className="mb-4" icon={<Icon.Calendar size={18} />} title={state.sim ? 'Test mode: payments are simulated' : 'Online payment is being connected'}>
+            {state.sim
+              ? 'Reserve this date, then tap Pay to simulate the payment. No real money moves.'
+              : 'You can reserve this date now. We hold it for 30 minutes. Payment with Ozow and PayFast switches on shortly.'}
           </Notice>
         )}
         <Notice icon={<Icon.Lock size={18} />} title="Your money stays yours. Until delivery.">
@@ -652,6 +829,18 @@ function Reserved() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   if (!b) return <Screen footer={<Button onClick={() => jump('home')}>Back to home</Button>}><div className="px-5 pt-10"><H1>Nothing reserved.</H1></div></Screen>
+  const payTest = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const paid = await market.simulatePayment(b.id)
+      set({ reservation: paid })
+      jump('confirmed')
+    } catch (e) {
+      setError(explain(e))
+      setBusy(false)
+    }
+  }
   const cancel = async () => {
     setBusy(true)
     setError('')
@@ -670,8 +859,9 @@ function Reserved() {
       footer={
         <div className="space-y-3">
           {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
-          <Button onClick={() => jump('bookings')}>View my bookings</Button>
-          <Button variant="soft" arrow={false} disabled={busy} onClick={cancel}>{busy ? 'Cancelling…' : 'Cancel this reservation'}</Button>
+          {state.sim && <Button disabled={busy} onClick={payTest}>{busy ? 'Processing…' : `Pay ${money(Number(b.total_amount))} (test)`}</Button>}
+          <Button variant={state.sim ? 'soft' : 'brand'} onClick={() => jump('bookings')}>View my bookings</Button>
+          <Button variant="soft" arrow={false} disabled={busy} onClick={cancel}>Cancel this reservation</Button>
         </div>
       }
     >
@@ -680,7 +870,9 @@ function Reserved() {
         <div className="mt-2 flex h-16 w-16 items-center justify-center rounded-full bg-cream text-amber-700"><Icon.Calendar size={28} /></div>
         <H1 className="mt-5">Your date is<br />reserved.</H1>
         <p className="mt-2 text-[14px] leading-relaxed text-neutral-600">
-          We’re holding this slot for 30 minutes. Online payment with Ozow and PayFast is being connected, so you can’t pay just yet.
+          {state.sim
+            ? 'We’re holding this slot for 30 minutes. This is test mode: tap Pay to simulate the payment. No real money moves.'
+            : 'We’re holding this slot for 30 minutes. Online payment with Ozow and PayFast is being connected, so you can’t pay just yet.'}
         </p>
         <div className="mt-5 rounded-2xl bg-surface p-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">{pkg.name} session</div>
@@ -691,7 +883,7 @@ function Reserved() {
             <span className="text-[14px] font-semibold text-ink">{money(Number(b.total_amount))}</span>
           </div>
         </div>
-        <Notice icon={<Icon.Lock size={18} />} className="mt-4" title="Nothing has been charged">You only pay once online payment is switched on.</Notice>
+        <Notice icon={<Icon.Lock size={18} />} className="mt-4" title="Nothing has been charged">{state.sim ? 'Test mode: no real money is ever taken.' : 'You only pay once online payment is switched on.'}</Notice>
       </div>
     </Screen>
   )
@@ -724,6 +916,51 @@ function GatewayDemo() {
 
 /* ---------- 6. Booking confirmed ---------- */
 export function Confirmed() {
+  return supabaseConfigured ? <ConfirmedLive /> : <ConfirmedDemo />
+}
+
+function ConfirmedLive() {
+  const { jump, state } = useApp()
+  const { p, pkg } = usePhotographer()
+  const b = state.reservation
+  if (!b) return <Screen footer={<Button onClick={() => jump('home')}>Back to home</Button>}><div className="px-5 pt-10"><H1>Nothing here.</H1></div></Screen>
+  const when = new Date(`${b.shoot_date}T00:00:00`)
+  const first = (p.name || 'Your photographer').split(' ')[0]
+  return (
+    <Screen
+      footer={
+        <div className="space-y-3">
+          <Button onClick={() => jump('bookings')}>View my bookings</Button>
+          <Button variant="soft" arrow={false} onClick={() => jump('home')}>Back to home</Button>
+        </div>
+      }
+    >
+      <TopBar title="Booking confirmed" />
+      <div className="flex flex-col items-center px-5 text-center">
+        <div className="mt-2 flex h-[88px] w-[88px] items-center justify-center rounded-full bg-emerald-50 text-ok"><Icon.Check size={36} /></div>
+        <div className="mt-3 text-[11px] font-bold uppercase tracking-wider text-ok">You’re all booked</div>
+        <H1 className="mt-3 text-[30px]">A moment worth<br />looking forward to.</H1>
+        <p className="mt-2 text-[13px] text-neutral-500">{first} can’t wait to capture your story.</p>
+        <div className="mt-5 w-full rounded-2xl bg-surface p-4 text-left">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">{pkg.name} session</div>
+          <div className="mt-1 font-display text-[22px] font-bold">{p.name}</div>
+          <div className="mt-2 flex items-center gap-2 text-[13px] text-neutral-600"><Icon.Calendar size={16} /> {DAYS_SHORT[when.getDay()]}, {when.getDate()} {MONTHS[when.getMonth()]} {when.getFullYear()} · {String(b.shoot_time).slice(0, 5)}</div>
+          <div className="mt-3 flex items-end justify-between text-[12px] text-neutral-500">
+            <span>Booking {b.booking_ref}</span>
+            <span className="text-[14px] font-semibold text-ink">{money(Number(b.total_amount))} paid</span>
+          </div>
+        </div>
+        <div className="mt-4 flex w-full items-center gap-2 text-[13px] font-semibold text-link"><Icon.Lock size={15} /> {money(Number(b.total_amount))} protected in escrow</div>
+        <p className="mt-2 w-full text-left text-[12.5px] leading-snug text-neutral-500">
+          {first} receives the first part 24 hours after your shoot, and the rest once you approve your photos.
+        </p>
+        {b.simulated && <Notice tone="cream" className="mt-4 w-full text-left" icon={<Icon.Eye size={18} />} title="Test payment">This was a simulated payment. No real money moved.</Notice>}
+      </div>
+    </Screen>
+  )
+}
+
+function ConfirmedDemo() {
   const { go, state } = useApp()
   const { p, pkg } = usePhotographer()
   return (
@@ -825,8 +1062,8 @@ function BookingsDemo() {
 /* ---------- 6c. Live: my bookings ---------- */
 const STATUS = {
   pending: ['Awaiting payment', 'bg-cream text-amber-700'],
-  confirmed: ['Confirmed', 'bg-emerald-50 text-ok'],
-  in_progress: ['In progress', 'bg-info text-link'],
+  confirmed: ['Paid', 'bg-emerald-50 text-ok'],
+  in_progress: ['Shoot done', 'bg-info text-link'],
   gallery_uploaded: ['Photos ready', 'bg-info text-link'],
   completed: ['Completed', 'bg-surface text-neutral-600'],
   disputed: ['Under review', 'bg-rose-50 text-rose-700'],
@@ -835,11 +1072,93 @@ const STATUS = {
 const HOLD_MS = 30 * 60 * 1000
 const statusOf = (b) => (b.status === 'pending' && Date.now() - new Date(b.created_at).getTime() > HOLD_MS ? ['Expired', 'bg-surface text-neutral-500'] : STATUS[b.status] || [b.status, 'bg-surface'])
 
+function ClientBookingCard({ b, sim, onChanged }) {
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [label, tone] = statusOf(b)
+  const when = new Date(`${b.shoot_date}T00:00:00`)
+  const total = Number(b.total_amount)
+  const fee = Number(b.platform_fee)
+  const awaiting = b.status === 'pending' && label === 'Awaiting payment'
+  const hoursToShoot = (new Date(b.shoot_starts_at).getTime() - Date.now()) / 3600000
+
+  const run = async (key, fn) => {
+    setBusy(key)
+    setError('')
+    try {
+      await fn()
+      setConfirming(false)
+      await onChanged()
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-semibold">{b.photographerName}</div>
+          <div className="text-[12px] text-neutral-500">{b.packageName} · {when.getDate()} {MONTHS[when.getMonth()].slice(0, 3)} {when.getFullYear()} · {String(b.shoot_time).slice(0, 5)}</div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
+          {b.simulated && <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-[12px] text-neutral-500">
+        <span>{b.booking_ref}</span>
+        <span className="text-[14px] font-semibold text-ink">{money(total)}</span>
+      </div>
+
+      {awaiting && (
+        <div className="mt-3 space-y-2">
+          {sim && <Button disabled={Boolean(busy)} onClick={() => run('pay', async () => { await market.simulatePayment(b.id) })}>{busy === 'pay' ? 'Processing…' : `Pay ${money(total)} (test)`}</Button>}
+          <button onClick={() => run('cancel', () => market.cancelBooking(b.id, 'Cancelled before payment'))} disabled={Boolean(busy)} className="text-[13px] font-semibold text-link disabled:opacity-50">
+            {busy === 'cancel' ? 'Cancelling…' : 'Cancel reservation'}
+          </button>
+        </div>
+      )}
+
+      {(b.status === 'confirmed' || b.status === 'in_progress') && (
+        <p className="mt-3 flex items-center gap-1.5 text-[12px] text-link"><Icon.Lock size={13} /> Held securely until your photos are delivered.</p>
+      )}
+
+      {b.status === 'gallery_uploaded' && (
+        <div className="mt-3 space-y-2">
+          <p className="text-[12px] text-neutral-600">Your photos are ready. Approve them to release the rest of the payment, or it releases automatically after 48 hours.</p>
+          <Button disabled={Boolean(busy)} onClick={() => run('approve', () => market.approveGallery(b.id))}>{busy === 'approve' ? 'Approving…' : 'Approve photos & release payment'}</Button>
+        </div>
+      )}
+
+      {b.status === 'confirmed' && !confirming && (
+        <button onClick={() => setConfirming(true)} className="mt-3 block text-[13px] font-semibold text-neutral-500">Cancel booking</button>
+      )}
+      {b.status === 'confirmed' && confirming && (
+        <div className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">
+          {hoursToShoot >= 48
+            ? <>Cancelling now refunds <b>{money(total - fee)}</b>. Our {money(fee)} fee isn’t refunded.</>
+            : <>The shoot is less than 48 hours away, so cancelling means <b>no refund</b>: your payment goes to the photographer.</>}
+          <div className="mt-3 flex gap-3">
+            <button disabled={Boolean(busy)} onClick={() => run('cancel', () => market.cancelBooking(b.id, 'Cancelled by client'))} className="rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">{busy === 'cancel' ? 'Cancelling…' : 'Yes, cancel it'}</button>
+            <button onClick={() => setConfirming(false)} className="rounded-lg bg-surface px-3 py-2 text-[12.5px] font-semibold">Keep booking</button>
+          </div>
+        </div>
+      )}
+
+      {b.status === 'cancelled' && b.payment_status === 'refunded' && <p className="mt-3 text-[12px] text-neutral-500">Refunded{b.simulated ? ' (test)' : ''}.</p>}
+      {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+    </div>
+  )
+}
+
 function BookingsLive() {
-  const { auth, go, set } = useApp()
+  const { auth, go, set, state } = useApp()
   const [items, setItems] = useState(null)
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState('')
   const userId = auth.user?.id
 
   const load = useCallback(async () => {
@@ -852,19 +1171,6 @@ function BookingsLive() {
     }
   }, [userId])
   useEffect(() => { if (userId) load() }, [userId, load])
-
-  const cancel = async (id) => {
-    setBusy(id)
-    setError('')
-    try {
-      await market.cancelBooking(id, 'Cancelled before payment')
-      await load()
-    } catch (e) {
-      setError(explain(e))
-    } finally {
-      setBusy('')
-    }
-  }
 
   if (auth.status !== 'in') {
     return (
@@ -883,31 +1189,7 @@ function BookingsLive() {
           <Notice className="mt-5" icon={<Icon.Calendar size={18} />} title="No bookings yet">Find a photographer and reserve a date.</Notice>
         )}
         <div className="mt-5 space-y-3 pb-5">
-          {items?.map((b) => {
-            const [label, tone] = statusOf(b)
-            const when = new Date(`${b.shoot_date}T00:00:00`)
-            const canCancel = b.status === 'pending' && label === 'Awaiting payment'
-            return (
-              <div key={b.id} className="rounded-2xl bg-surface p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[15px] font-semibold">{b.photographerName}</div>
-                    <div className="text-[12px] text-neutral-500">{b.packageName} · {when.getDate()} {MONTHS[when.getMonth()].slice(0, 3)} {when.getFullYear()} · {String(b.shoot_time).slice(0, 5)}</div>
-                  </div>
-                  <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
-                </div>
-                <div className="mt-3 flex items-center justify-between text-[12px] text-neutral-500">
-                  <span>{b.booking_ref}</span>
-                  <span className="text-[14px] font-semibold text-ink">{money(Number(b.total_amount))}</span>
-                </div>
-                {canCancel && (
-                  <button onClick={() => cancel(b.id)} disabled={busy === b.id} className="mt-3 text-[13px] font-semibold text-link disabled:opacity-50">
-                    {busy === b.id ? 'Cancelling…' : 'Cancel reservation'}
-                  </button>
-                )}
-              </div>
-            )
-          })}
+          {items?.map((b) => <ClientBookingCard key={b.id} b={b} sim={state.sim} onChanged={load} />)}
         </div>
       </div>
     </Screen>

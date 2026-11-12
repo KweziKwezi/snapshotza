@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../store.jsx'
 import { AppNav } from './Client.jsx'
 import * as api from '../lib/studio.js'
+import * as market from '../lib/market.js'
 import {
   BANKS, BOOKINGS_PER_TIER, MAX_TIER, MIN_PORTFOLIO_PHOTOS, SPECIALTIES, TIER_DEPOSIT_PCT, money, tierFor,
 } from '../data.js'
@@ -116,7 +117,17 @@ function StudioGate() {
 
 /* ---------- 8. Photographer dashboard ---------- */
 function Dashboard({ live }) {
-  const { go, state, auth } = useApp()
+  const { go, jump, state, auth } = useApp()
+  const [earn, setEarn] = useState(null)
+  const [bookings, setBookings] = useState(null)
+  useEffect(() => {
+    if (!live) return undefined
+    let off = false
+    market.myEarnings().then((e) => { if (!off) setEarn(e) }).catch(() => {})
+    market.studioBookings(auth.photographer.id).then((b) => { if (!off) setBookings(b) }).catch(() => { if (!off) setBookings([]) })
+    return () => { off = true }
+  }, [live, auth.photographer?.id])
+  const active = (bookings || []).filter((b) => ['confirmed', 'in_progress', 'gallery_uploaded'].includes(b.status)).slice(0, 3)
   const [open, setOpen] = useState([18, 21])
   const booked = [21, 24]
   const week = [
@@ -142,13 +153,25 @@ function Dashboard({ live }) {
 
         <div className="mt-4 rounded-3xl bg-ink p-5 text-white">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Earned this month</div>
-          <div className="mt-1 font-display text-[38px] font-extrabold">{money(live ? 0 : 18450)}</div>
-          <div className="text-[12px] text-emerald-400">{live ? 'Your first booking will show up here.' : '↑ 18% vs last month'}</div>
+          <div className="mt-1 font-display text-[38px] font-extrabold">{money(live ? earn?.thisMonth || 0 : 18450)}</div>
+          <div className="text-[12px] text-emerald-400">{live ? (earn?.thisMonth > 0 ? 'Released to you this month.' : 'Your first payment will show up here.') : '↑ 18% vs last month'}</div>
           <div className="mt-4 flex items-center justify-between border-t border-white/15 pt-3 text-[13px]">
             <span className="text-neutral-300">In escrow</span>
-            <span className="font-semibold text-brand">{money(live ? 0 : 9000)}</span>
+            <span className="font-semibold text-brand">{money(live ? earn?.inEscrow || 0 : 9000)}</span>
           </div>
         </div>
+
+        {live && (
+          <button onClick={() => go('earnings')} className="mt-3 flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left">
+            <Icon.Bank size={22} />
+            <div className="flex-1">
+              <div className="text-[14px] font-semibold">Available to withdraw</div>
+              <div className="text-[12px] text-neutral-500">Earnings & withdrawals</div>
+            </div>
+            <div className="font-display text-[18px] font-bold">{money(earn?.available || 0)}</div>
+            <Icon.Chevron size={18} />
+          </button>
+        )}
 
         <div className="mt-4 rounded-2xl border border-[#f1e3a0] bg-cream p-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-600">Tier {tier} · {TIER_DEPOSIT_PCT[tier]}% paid 24h after each shoot</div>
@@ -171,11 +194,28 @@ function Dashboard({ live }) {
         )}
 
         <div className="mb-3 mt-6 flex items-center justify-between">
-          <h2 className="font-display text-[18px] font-bold">Upcoming bookings</h2>
-          {!live && <button className="text-[13px] font-semibold text-link">View all</button>}
+          <h2 className="font-display text-[18px] font-bold">{live ? 'Active bookings' : 'Upcoming bookings'}</h2>
+          <button onClick={() => live && jump('bookings')} className="text-[13px] font-semibold text-link">View all</button>
         </div>
         {live ? (
-          <div className="rounded-2xl bg-surface p-4 text-[13px] text-neutral-600">No bookings yet. Your studio is approved and ready.</div>
+          bookings === null ? (
+            <p className="text-[13px] text-neutral-500">Loading…</p>
+          ) : active.length === 0 ? (
+            <div className="rounded-2xl bg-surface p-4 text-[13px] text-neutral-600">{bookings.length === 0 ? 'No bookings yet. Your studio is approved and ready.' : 'No active bookings right now.'}</div>
+          ) : (
+            <div className="space-y-3">
+              {active.map((b) => {
+                const d = new Date(`${b.shoot_date}T00:00:00`)
+                return (
+                  <button key={b.id} onClick={() => jump('bookings')} className="flex w-full items-center gap-4 rounded-2xl bg-surface p-3 text-left">
+                    <div className="flex h-14 w-14 flex-col items-center justify-center rounded-xl bg-white"><span className="font-display text-[20px] font-bold leading-none">{d.getDate()}</span><span className="text-[10px] uppercase text-neutral-500">{d.toLocaleString('en', { month: 'short' })}</span></div>
+                    <div className="flex-1"><div className="text-[14px] font-semibold">{b.clientName}</div><div className="text-[11.5px] text-neutral-500">{b.packageName} · {String(b.shoot_time).slice(0, 5)}</div></div>
+                    <span className="self-end text-[11.5px] font-semibold text-link">You earn {money(b.net)}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )
         ) : (
           <div className="space-y-3">
             {[

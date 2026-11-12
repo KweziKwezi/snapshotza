@@ -513,34 +513,78 @@ await raises('another photographer cannot open days for them', as(user(p1), `ins
 eq('another photographer cannot close their days', (await as(user(p1), `delete from availability where photographer_id=$1`, [pid2])).affectedRows, 0)
 eq('a client cannot read the raw calendar table', (await as(user(c2), `select * from availability where photographer_id=$1`, [pid2])).rows.length, 0)
 
-// clients browse the calendar through get_availability
-const cal = async (who) => (await as(who, `select day::text d, is_booked b from get_availability($1,$2,$3) order by day`, [pid2, d1m, d3m])).rows
-eq('anonymous visitors see exactly the open days', (await cal(anon)).map((r) => r.d).join(','), [d1m, d2m, d3m].join(','))
-eq('none are booked yet', (await cal(user(c2))).filter((r) => r.b).length, 0)
+// clients browse the calendar through get_open_days / get_free_slots (free start times for a shoot of N hours)
+const openDays = async (who, hours = 4, ph = pid2) => (await as(who, `select day::text d, free_slots n, start_time::text s, end_time::text e from get_open_days($1,$2,$3,$4) order by day`, [ph, d1m, d3m, hours])).rows
+const slots = async (who, day, hours, ph = pid2) => (await as(who, `select t::text s from get_free_slots($1,$2,$3) t`, [ph, day, hours])).rows.map((r) => r.s.slice(0, 5))
+const book = (who, pkg, day, time) => as(who, `select * from create_booking($1,$2,$3,'','ozow')`, [pkg, day, time])
+eq('anonymous visitors see exactly the open days', (await openDays(anon)).map((r) => r.d).join(','), [d1m, d2m, d3m].join(','))
+eq('...with the usual hours 08:00-18:00', (await openDays(anon))[0].s + '-' + (await openDays(anon))[0].e, '08:00:00-18:00:00')
+eq('4-hour shoot: 13 start times, 08:00 to 14:00', `${(await slots(anon, d1m, 4)).length} ${(await slots(anon, d1m, 4))[0]}..${(await slots(anon, d1m, 4)).pop()}`, '13 08:00..14:00')
+eq('2-hour shoot: 17 start times, last 16:00', `${(await slots(anon, d1m, 2)).length} ${(await slots(anon, d1m, 2)).pop()}`, '17 16:00')
+eq('8-hour shoot: 5 start times, last 10:00', `${(await slots(anon, d1m, 8)).length} ${(await slots(anon, d1m, 8)).pop()}`, '5 10:00')
+eq('a shoot longer than the day has no start times', (await slots(anon, d1m, 11)).length, 0)
+eq('free_slots matches the start times', (await openDays(anon, 2))[0].n, 17)
+eq('a closed day has no start times', (await slots(anon, await dayPlus(45), 2)).length, 0)
 
 // a real booking through the RPC, with the exact argument types the app sends (date + 'HH:MM' strings)
-const fav = (await as(user(c2), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d1m])).rows[0]
+const fav = (await book(user(c2), pk2[1], d1m, '14:00')).rows[0]
 eq('booking created awaiting payment', `${fav.status}/${fav.payment_status}`, 'pending/pending')
 eq('price comes from the package, not the client', fav.total_amount, '2500.00')
-eq('the booked day is flagged to other clients', (await cal(anon)).find((r) => r.d === d1m).b, true)
-eq('other days stay free', (await cal(anon)).filter((r) => !r.b).length, 2)
-await raises('another client cannot take the same day/time', as(user(c1), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d1m]), /already booked/)
-await raises('a day the photographer has not opened is refused', as(user(c1), `select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], await dayPlus(55)]), /not available on this date/)
+
+console.log('\n# One-hour gap between shoots, and working hours')
+eq('after a 14:00-18:00 booking a 4h shoot can only start by 09:00 (gap before it)', (await slots(anon, d1m, 4)).join(','), '08:00,08:30,09:00')
+eq('a 2h shoot can start until 11:00 (ends 13:00, one hour before 14:00)', (await slots(anon, d1m, 2)).pop(), '11:00')
+eq('other days are unaffected', (await slots(anon, d2m, 4)).length, 13)
+eq('the day shows fewer free start times', (await openDays(anon, 4))[0].n, 3)
+await raises('same time is taken', book(user(c1), pk2[1], d1m, '14:00'), /already booked/)
+await raises('13:30 is too close (30 min before the 14:00 shoot)', book(user(c1), pk2[0], d1m, '11:30'), /already booked/)
+const early = (await book(user(c1), pk2[0], d1m, '11:00')).rows[0]
+eq('exactly one hour before is allowed (11:00-13:00 then 14:00)', early.status, 'pending')
+await as(user(c1), `select * from cancel_booking($1,'')`, [early.id])
+const mid = (await book(user(c1), pk2[0], d2m, '10:00')).rows[0]
+await raises('12:30 is too close after a 10:00-12:00 shoot', book(user(c2), pk2[0], d2m, '12:30'), /already booked/)
+const after = (await book(user(c2), pk2[0], d2m, '13:00')).rows[0]
+eq('exactly one hour after is allowed (13:00)', after.status, 'pending')
+eq('two shoots on one day', (await slots(anon, d2m, 2)).includes('10:00'), false)
+await as(user(c1), `select * from cancel_booking($1,'')`, [mid.id])
+await as(user(c2), `select * from cancel_booking($1,'')`, [after.id])
+await raises('before opening time is refused', book(user(c1), pk2[0], d3m, '07:30'), /outside the photographer's available hours/)
+await raises('a shoot that would end after closing is refused', book(user(c1), pk2[0], d3m, '17:00'), /outside the photographer's available hours/)
+const atClose = (await book(user(c1), pk2[0], d3m, '16:00')).rows[0]
+eq('ending exactly at closing time is allowed', atClose.status, 'pending')
+await as(user(c1), `select * from cancel_booking($1,'')`, [atClose.id])
+
+// per-day hours override and usual hours
+await asP2(`update availability set start_time='10:00', end_time='14:00' where photographer_id=$1 and day=$2`, [pid2, d3m])
+eq('a per-day override narrows that day only', `${(await slots(anon, d3m, 2)).join(',')}`, '10:00,10:30,11:00,11:30,12:00')
+eq('open days report the override', (await openDays(anon, 2)).find((r) => r.d === d3m).s, '10:00:00')
+await raises('09:00 is outside the override', book(user(c1), pk2[0], d3m, '09:00'), /outside the photographer's available hours/)
+await raises('hours need both a start and an end', asP2(`update availability set end_time=null where photographer_id=$1 and day=$2`, [pid2, d3m]), /check/)
+await raises('the end must be after the start', asP2(`update availability set end_time='09:00' where photographer_id=$1 and day=$2`, [pid2, d3m]), /check/)
+await asP2(`update availability set start_time=null, end_time=null where photographer_id=$1 and day=$2`, [pid2, d3m])
+eq('clearing the override goes back to the usual hours', (await slots(anon, d3m, 2)).length, 17)
+await asP2(`update photographer_profiles set work_start='09:00', work_end='17:00' where id=$1`, [pid2])
+eq('changing the usual hours changes every day without an override', `${(await slots(anon, d2m, 2)).length} ${(await slots(anon, d2m, 2))[0]}..${(await slots(anon, d2m, 2)).pop()}`, '13 09:00..15:00')
+await raises('usual hours must end after they start', asP2(`update photographer_profiles set work_end='08:00' where id=$1`, [pid2]), /check/)
+await asP2(`update photographer_profiles set work_start='08:00', work_end='18:00' where id=$1`, [pid2])
+await raises('a client cannot change a photographer\'s hours', as(user(c2), `update photographer_profiles set work_start='00:00' where id=$1`, [pid2]).then((r) => { if (!r.affectedRows) throw new Error('row-level security: 0 rows') }), /row-level security/)
+
+await raises('a day the photographer has not opened is refused', book(user(c1), pk2[1], await dayPlus(55), '14:00'), /not available on this date/)
 await raises('a photographer account cannot book', asP2(`select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d2m]), /only clients can make bookings/)
-const mine = (await as(user(c2), `select id, booking_ref, status, shoot_date::text d, shoot_time::text t, total_amount, photographer_id, package_id from bookings where client_id=$1 order by created_at desc limit 1`, [c2])).rows[0]
+const mine = (await as(user(c2), `select id, booking_ref, status, shoot_date::text d, shoot_time::text t, total_amount, photographer_id, package_id from bookings where client_id=$1 and id=$2`, [c2, fav.id])).rows[0]
 eq('the client\'s booking list includes it', mine.id, fav.id)
 eq('stored date/time are what was chosen', `${mine.d} ${mine.t}`, `${d1m} 14:00:00`)
 eq('the photographer sees it too', (await asP2(`select * from bookings where id=$1`, [fav.id])).rows.length, 1)
 eq('another client does not', (await as(user(c1), `select * from bookings where id=$1`, [fav.id])).rows.length, 0)
 await as(user(c2), `select * from cancel_booking($1,'Cancelled before payment')`, [fav.id])
-eq('cancelling frees the day again', (await cal(anon)).find((r) => r.d === d1m).b, false)
+eq('cancelling frees the time again', (await slots(anon, d1m, 4)).length, 13)
 
 // a photographer closes a day
 await asP2(`delete from availability where photographer_id=$1 and day = any($2::date[])`, [pid2, [d2m]])
-eq('a closed day disappears from the client calendar', (await cal(anon)).map((r) => r.d).join(','), [d1m, d3m].join(','))
+eq('a closed day disappears from the client calendar', (await openDays(anon)).map((r) => r.d).join(','), [d1m, d3m].join(','))
 await asP2(`delete from availability where photographer_id=$1 and day = any($2::date[])`, [pid2, [d1m, d3m]])
-eq('closing everything leaves nothing bookable', (await cal(anon)).length, 0)
-eq('get_availability reveals nothing for an unapproved photographer', (await as(anon, `select * from get_availability($1,$2,$3)`, [pid, d1m, d3m])).rows.length, 0)
+eq('closing everything leaves nothing bookable', (await openDays(anon)).length, 0)
+eq('an unapproved or suspended photographer shows nothing', (await openDays(anon, 4, pid)).length + (await slots(anon, d1m, 2, pid)).length, 0)
 
 // favourites
 const addFav = (who, client, ph) => as(who, `insert into favorites (client_id,photographer_id) values ($1,$2) on conflict (client_id,photographer_id) do nothing`, [client, ph])
@@ -552,6 +596,83 @@ await raises('cannot save a favourite as someone else', addFav(user(c1), c2, pid
 eq('unsaving removes it', (await as(user(c2), `delete from favorites where client_id=$1 and photographer_id=$2`, [c2, pid2])).affectedRows, 1)
 eq('anonymous visitors cannot save favourites', await as(anon, `insert into favorites (client_id,photographer_id) values ($1,$2)`, [c2, pid2]).then(() => 'allowed').catch(() => 'blocked'), 'blocked')
 eq('reviews are readable by anyone', (await as(anon, `select id, rating, comment, created_at from reviews limit 1`)).rows.length >= 0, true)
+
+console.log('\n# Test mode: simulated payment, fast-forward, delivery and withdrawal')
+const dS = await dayPlus(60)
+await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, dS])
+const sb = (await book(user(c1), pk2[1], dS, '10:00')).rows[0]
+eq('test mode is on by default', (await su(`select simulate_payments s from platform_settings`)).rows[0].s, true)
+await raises('another client cannot pay for it', as(user(c2), `select * from simulate_payment($1)`, [sb.id]), /not allowed/)
+await raises('the photographer cannot pay for it', asP2(`select * from simulate_payment($1)`, [sb.id]), /not allowed/)
+await raises('visitors cannot call simulate_payment', as(anon, `select * from simulate_payment($1)`, [sb.id]), /permission denied/)
+const paid = (await as(user(c1), `select * from simulate_payment($1)`, [sb.id])).rows[0]
+eq('paying confirms the booking and holds the money', `${paid.status}/${paid.payment_status}`, 'confirmed/held')
+eq('...and flags it as a test booking', paid.simulated, true)
+const pay = (await su(`select gateway_reference r, raw_payload->>'simulated' s, amount::text a from payments where booking_id=$1`, [sb.id])).rows[0]
+eq('the payment record is clearly marked', `${pay.r.startsWith('SIM-')}/${pay.s}/${pay.a}`, 'true/true/2500.00')
+eq('the chat opens with a system message', (await as(user(c1), `select * from chat_messages where booking_id=$1 and message_type='system'`, [sb.id])).rows.length, 1)
+await raises('cannot pay twice', as(user(c1), `select * from simulate_payment($1)`, [sb.id]), /not awaiting payment/)
+const earn = async () => (await asP2(`select available::text a, processing::text p, paid_out::text o, in_escrow::text e, earned_this_month::text m from my_earnings()`)).rows[0]
+eq('paid money is in escrow for the photographer (2500 - 125 - 87.50)', `${(await earn()).e}/${(await earn()).a}`, '2287.50/0')
+await raises('a stranger cannot fast-forward', as(user(c2), `select * from simulate_shoot_done($1)`, [sb.id]), /not allowed/)
+await raises('the client cannot fast-forward', as(user(c1), `select * from simulate_shoot_done($1)`, [sb.id]), /not allowed/)
+await raises('delivery needs the shoot to be done first', asP2(`select * from simulate_delivery($1)`, [sb.id]), /mark the shoot as done first/)
+const done = (await asP2(`select * from simulate_shoot_done($1)`, [sb.id])).rows[0]
+eq('shoot done: in progress, deposit released', done.status, 'in_progress')
+eq('Tier 1 deposit is 30% of net, available to withdraw', `${(await earn()).a}/${(await earn()).e}`, '686.25/1601.25')
+eq('the payout is flagged as a test payout', (await su(`select simulated s from payouts where booking_id=$1`, [sb.id])).rows[0].s, true)
+await raises('cannot fast-forward twice', asP2(`select * from simulate_shoot_done($1)`, [sb.id]), /only be fast-forwarded once/)
+eq('earned this month includes it', (await earn()).m, '686.25')
+eq('a client cannot read payouts', (await as(user(c1), `select * from payouts where booking_id=$1`, [sb.id])).rows.length, 0)
+
+const wd = (await asP2(`select * from request_withdrawal()`)).rows[0]
+eq('withdrawal pays out everything available', `${wd.r_total}/${wd.r_count}/${wd.r_completed}`, '686.25/1/true')
+eq('...with a SIM reference', wd.r_reference.startsWith('SIM-'), true)
+const po = (await su(`select status, bank_reference r from payouts where booking_id=$1`, [sb.id])).rows[0]
+eq('the payout is completed and carries the reference', `${po.status}/${po.r === wd.r_reference}`, 'completed/true')
+eq('balances move: available 0, paid out 686.25', `${(await earn()).a}/${(await earn()).o}`, '0.00/686.25'.replace('0.00', '0'))
+await raises('nothing left to withdraw', asP2(`select * from request_withdrawal()`), /nothing available to withdraw/)
+await raises('clients cannot withdraw', as(user(c1), `select * from request_withdrawal()`), /not a photographer account/)
+
+const dl = (await asP2(`select * from simulate_delivery($1)`, [sb.id])).rows[0]
+eq('test delivery moves it to gallery uploaded', dl.status, 'gallery_uploaded')
+eq('the final payment waits for the client', (await earn()).a, '0')
+await raises('only the client can approve', asP2(`select * from approve_gallery($1)`, [sb.id]), /not allowed/)
+const fin = (await as(user(c1), `select * from approve_gallery($1)`, [sb.id])).rows[0]
+eq('client approves: completed and fully released', `${fin.status}/${fin.payment_status}`, 'completed/fully_released')
+eq('the rest (70%) becomes available', `${(await earn()).a}/${(await earn()).e}`, '1601.25/0')
+const wd2 = (await asP2(`select * from request_withdrawal()`)).rows[0]
+eq('second withdrawal', `${wd2.r_total}/${wd2.r_completed}`, '1601.25/true')
+eq('lifetime paid out equals the net amount', (await earn()).o, '2287.50')
+eq('a completed booking counts toward the tier', (await su(`select total_bookings n from photographer_profiles where id=$1`, [pid2])).rows[0].n, 1)
+
+console.log('\n# Test mode can never touch real money')
+const dR = await dayPlus(61)
+await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, dR])
+const rb = (await book(user(c2), pk2[1], dR, '10:00')).rows[0]
+await as(svc, `select * from confirm_payment($1,'ozow','REF-REAL-77',$2)`, [rb.id, rb.total_amount])
+eq('a gateway-paid booking is not flagged as a test', (await getB(rb.id)).simulated, false)
+await raises('test mode cannot fast-forward a really-paid booking', asP2(`select * from simulate_shoot_done($1)`, [rb.id]), /only test bookings/)
+await raises('...or deliver it without photos', asP2(`select * from simulate_delivery($1)`, [rb.id]), /only test bookings/)
+await shiftEnded(rb.id, 25)
+await as(svc, `select process_due_payouts()`)
+const rp = (await su(`select simulated s, status from payouts where booking_id=$1`, [rb.id])).rows[0]
+eq('its payout is real (not flagged) and available', `${rp.s}/${rp.status}`, 'false/pending')
+const rw = (await asP2(`select * from request_withdrawal()`)).rows[0]
+eq('withdrawing a real payout does NOT complete it, even in test mode', `${rw.r_completed}/${rw.r_reference}`, 'false/null')
+eq('it waits as processing for an admin', (await su(`select status from payouts where booking_id=$1`, [rb.id])).rows[0].status, 'processing')
+await as(user(adminId), `select * from admin_complete_payout((select id from payouts where booking_id=$1),'EFT-77')`, [rb.id])
+eq('an admin completes it after the real transfer', (await su(`select status, bank_reference r from payouts where booking_id=$1`, [rb.id])).rows[0].r, 'EFT-77')
+
+await su(`update platform_settings set simulate_payments=false`)
+const dO = await dayPlus(62)
+await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, dO])
+const ob = (await book(user(c1), pk2[1], dO, '10:00')).rows[0]
+await raises('with test mode off, simulated payment is refused', as(user(c1), `select * from simulate_payment($1)`, [ob.id]), /switched off/)
+await as(svc, `select * from confirm_payment($1,'ozow','REF-REAL-78',$2)`, [ob.id, ob.total_amount])
+await raises('...and so is fast-forwarding', asP2(`select * from simulate_shoot_done($1)`, [ob.id]), /switched off/)
+await raises('...and test delivery', asP2(`select * from simulate_delivery($1)`, [ob.id]), /switched off/)
+await su(`update platform_settings set simulate_payments=true`)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

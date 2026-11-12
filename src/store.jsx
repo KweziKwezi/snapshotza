@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase, supabaseConfigured } from './lib/supabase.js'
 import { loadAccount, signOut as apiSignOut } from './lib/auth.js'
 import { loadStudio, studioState } from './lib/studio.js'
+import { getTestMode } from './lib/market.js'
 
 const Ctx = createContext(null)
 export const useApp = () => useContext(Ctx)
@@ -17,6 +18,7 @@ const initial = {
   bookingStage: 'shoot_done', // paid -> shoot_done -> delivered -> released
   bookingRef: 'SZ-2048',
   paid: false,
+  sim: false, // TEST MODE: payments and payouts are simulated (platform_settings.simulate_payments)
   selected: null, // live marketplace: { p, packages, portfolio, reviews } for the photographer being viewed
   reservation: null, // the booking just created (awaiting payment)
   afterAuth: null, // screen to return to once the user has signed in
@@ -76,6 +78,12 @@ export function AppProvider({ children, start = 'splash' }) {
     setAuth({ status: 'in', user, profile: res.profile || null, photographer: res.photographer || null })
   }, [])
 
+  // Is the platform in TEST MODE? Public setting; if it can't be read we assume real mode (safe default).
+  useEffect(() => {
+    if (!supabaseConfigured) return
+    getTestMode().then((sim) => setState((s) => ({ ...s, sim }))).catch(() => {})
+  }, [])
+
   // Keep the session in sync. (The callback must not await Supabase calls directly, so defer with setTimeout.)
   useEffect(() => {
     if (!supabaseConfigured) return undefined
@@ -89,7 +97,7 @@ export function AppProvider({ children, start = 'splash' }) {
   const signOut = useCallback(async () => {
     await apiSignOut()
     hydratedFor.current = null
-    setState(initial)            // forget the previous person's data
+    setState((s) => ({ ...initial, sim: s.sim }))            // forget the previous person's data
     setAuth(signedOut)
     setStack(['splash'])
   }, [])

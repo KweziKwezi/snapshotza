@@ -184,5 +184,8 @@ Same address, same accounts and data. The layout is chosen by screen size:
   - Find photographers: search, a style sidebar, sorting, and a large grid;
   - Photographer page: cover, bio, portfolio and reviews, with a booking panel that stays in view;
   - Messages: conversation list and the open chat side by side;
-  - every other screen (booking steps, bookings, account, studio, admin) is shown as a centred page under the site header.
+  - Booking steps: a checkout with a step tracker and a booking summary (photographer, package, date, rate, total) on the side;
+  - Account, bookings, notifications, the photographer studio (dashboard, earnings, profile, portfolio, packages, hours, bank) and all admin screens: a dashboard with a side menu;
+  - Sign in / create account: a split page with a brand panel; photographer onboarding: the five steps in a sidebar; policy: an article page.
+  - The screens are shared with the app (same logic and rules); inside the website layouts they render as web pages (`WebContext` in `src/ui.jsx`).
 - Signed-out visitors see the landing page on both.

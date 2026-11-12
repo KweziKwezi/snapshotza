@@ -158,3 +158,9 @@ Run `supabase/migrations/20261116000012_chat.sql` after 0011.
 - A "Message" link sits on every paid booking card, and notifications for new messages open the chat.
 - Rules in the database: only the two people on a paid booking can read or write (admins can read for disputes); no empty or 2000+ character messages; at most 30 messages a minute; cancelled bookings keep their history but close for new messages. The other person gets one in-app notification until they open the chat (no pile-up).
 - Text only for now (photos in chat can come later). Tests: `npm run test:db` (422 checks).
+
+## Chats are deleted after 20 days (migration 13)
+Run `supabase/migrations/20261117000013_chat_retention.sql` after 0012. A message is deleted once it is 20 days old (setting `platform_settings.chat_retention_days`), by the Worker's daily job. Chats of a booking with an open problem report are kept until it is decided. Tests: `npm run test:db` (430), `npm run test:worker` (39).
+
+## Fees and refunds
+`docs/FEES_AND_REFUNDS_PROPOSAL.md` is a draft policy for the owner to edit before it is built into the app and turned into the Terms.

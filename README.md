@@ -23,7 +23,7 @@ Verification is now step 5 of 5.
 
 ## Business rules (the database is the source of truth)
 - The client pays exactly the package price. Our 5% fee and the ~3.5% gateway fee are deducted from the photographer's side.
-- **Deposit** (released 24h after the shoot ends, unless a no-show/dispute is reported): Tier 1 = 30%, Tier 2 = 40%, Tier 3 = 50% of the net amount.
+- **Deposit** (released when the client confirms the shoot, or 24h after the photographer marks it complete; frozen if a problem is reported): Tier 1 = 30%, Tier 2 = 40%, Tier 3 = 50% of the net amount.
 - **Final payment**: the remainder, once the photographer has uploaded *all* edited photos in the package and the client approves, or 48 hours pass.
 - Every 5 completed bookings moves a photographer up one tier (max Tier 3). A 4.5+ rating gate applies once they have reviews.
 - All numbers live in `platform_settings` and can be changed without code.
@@ -118,3 +118,14 @@ Run `20261111000007_listing_thumbnails.sql` in the Supabase SQL Editor (home gri
   **Before launch:** `update public.platform_settings set simulate_payments = false;` and delete test data
   (`delete from bookings where simulated;` after clearing dependent rows, or reset the project).
 - Run `20261112000008_hours_and_test_mode.sql` in the Supabase SQL Editor **before** using the new app version.
+
+
+## Shoot confirmation, notifications and problem reports (migration 9)
+Run `supabase/migrations/20261113000009_shoot_confirmation_notifications_reports.sql` in the Supabase SQL Editor (after 0008).
+
+- **Mark complete** - a photographer can mark a shoot complete only from its start time (`mark_shoot_complete`). Enforced in the database.
+- **Client confirms** - `confirm_shoot` releases the first payment straight away. If the client says nothing, it is confirmed automatically 24 hours after the photographer marked it complete (`process_due_payouts`, run on a schedule).
+- **Notifications** (in-app only for now; email/SMS/WhatsApp need a provider) - new booking, "did your shoot happen?", payment queued / being sent / sent, cancellations, problem reports. Bell with an unread badge, plus a Notifications screen.
+- **Problem reports** - client or photographer reports a problem (`report_issue`, description of at least 10 characters). Any payment not yet withdrawn is frozen ("on hold") until an admin decides (`admin_resolve_dispute`: refund the client, pay the photographer, or dismiss). Admin screens: Account > Problem reports.
+- **TEST MODE helpers** (simulated bookings only): "jump to after the shoot" and "skip the 24-hour / 48-hour wait" let you try the real steps without waiting.
+- Tests: `npm run test:db` (358 checks). Browser tests live outside the repo.

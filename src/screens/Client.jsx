@@ -138,7 +138,7 @@ function Highlight({ text, needle }) {
   return <>{text.slice(0, i)}<b className="font-bold">{text.slice(i, i + needle.length)}</b>{text.slice(i + needle.length)}</>
 }
 
-function SearchBox({ q, setQ, items, onPlace, onStyle, onPerson }) {
+export function SearchBox({ q, setQ, items, onPlace, onStyle, onPerson }) {
   const [focused, setFocused] = useState(false)
   const [active, setActive] = useState(-1)
   const list = useMemo(() => buildSuggestions(items, q), [items, q])

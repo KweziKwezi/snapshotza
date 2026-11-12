@@ -101,7 +101,7 @@ export function Messages() {
 }
 
 /* ---------- One conversation ---------- */
-export function Thread() {
+export function Thread({ embedded = false }) {
   const { auth, back, state, refreshUnread } = useApp()
   const bookingId = state.chatBooking
   const me = auth.user?.id
@@ -203,7 +203,7 @@ export function Thread() {
         </div>
       )}
     >
-      <TopBar title={info?.other_name || 'Chat'} onBack={back} />
+      <TopBar title={info?.other_name || 'Chat'} onBack={embedded ? undefined : back} />
       {info && <p className="px-5 text-[12px] text-neutral-500">{info.booking_ref} · {info.shoot_date} · {String(info.shoot_time).slice(0, 5)}</p>}
       <p className="px-5 text-[11.5px] text-neutral-400">Messages are deleted after {CHAT_RETENTION_DAYS} days.</p>
       <div className="px-4 pb-3 pt-2" data-testid="thread">

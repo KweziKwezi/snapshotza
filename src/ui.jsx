@@ -188,7 +188,7 @@ const TABS = [
 ]
 export function BottomNav({ active, onSelect, badges = {} }) {
   return (
-    <nav className="flex justify-around border-t border-line bg-white px-2 pb-2 pt-2">
+    <nav className="flex justify-around border-t border-line bg-white px-2 pb-2 pt-2 lg:hidden">
       {TABS.map((t) => {
         const on = t.id === active
         const Ic = t.icon
@@ -289,6 +289,7 @@ export function Lightbox({ photos, index, onClose, onIndex }) {
 }
 
 /* ---------- Notification bell with an unread badge ---------- */
+export { TABS }
 export function NotificationBell({ count = 0, onClick, className = '' }) {
   return (
     <button onClick={onClick} aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'} className={`relative ${className}`}>

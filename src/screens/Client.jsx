@@ -38,15 +38,20 @@ const endTime = (time, hours) => {
 }
 
 const NAV_TARGET = { home: 'home', messages: 'chat', bookings: 'bookings' }
-export function AppNav({ active }) {
-  const { jump, auth, set, state } = useApp()
-  const onSelect = (id) => {
+/** What the four main tabs do (shared by the bottom tabs on phones and the top bar on desktop). */
+export function useTabSelect() {
+  const { jump, auth } = useApp()
+  return (id) => {
     if (id !== 'profile') return jump(NAV_TARGET[id])
     // Profile tab: photographers land on their studio, signed-in users on their account, everyone else signs in.
     if (auth.status === 'in') return jump(auth.profile?.role === 'photographer' ? 'studio' : 'account')
     if (auth.status === 'out' && supabaseConfigured) return jump('auth')
     return jump('studio') // demo mode (no Supabase keys): keep the design walkthrough working
   }
+}
+export function AppNav({ active }) {
+  const { auth, state } = useApp()
+  const onSelect = useTabSelect()
   return <BottomNav active={active} onSelect={onSelect} badges={{ messages: auth.status === 'in' ? state.chatUnread : 0 }} />
 }
 
@@ -210,7 +215,8 @@ function SearchBox({ q, setQ, items, onPlace, onStyle, onPerson }) {
 export function Home() {
   const { go, set, state, auth } = useApp()
   const live = supabaseConfigured
-  const [cat, setCat] = useState('All')
+  const [cat, setCat] = useState(state.homeCategory || 'All')
+  useEffect(() => { if (state.homeCategory) set({ homeCategory: null }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [q, setQ] = useState('')
   const [items, setItems] = useState(live ? null : PHOTOGRAPHERS)
   const [error, setError] = useState('')
@@ -266,7 +272,7 @@ export function Home() {
               <Icon.Pin size={14} /> South Africa
             </div>
           </div>
-          <NotificationBell count={auth.status === 'in' ? state.unread : 0} className="mt-1" onClick={() => (auth.status === 'in' ? go('notifications') : go('auth'))} />
+          <NotificationBell count={auth.status === 'in' ? state.unread : 0} className="mt-1 lg:hidden" onClick={() => (auth.status === 'in' ? go('notifications') : go('auth'))} />
         </div>
 
         <H1 className="mt-5 text-[32px]">
@@ -311,7 +317,7 @@ export function Home() {
           <p className="py-10 text-center text-sm text-neutral-500">No photographers have joined yet. Check back soon.</p>
         )}
         {items && items.length > 0 && list.length === 0 && <p className="py-10 text-center text-sm text-neutral-500">No photographers match that yet.</p>}
-        <div className="grid grid-cols-2 gap-3 pb-5">
+        <div className="grid grid-cols-2 gap-3 pb-5 sm:grid-cols-3 lg:grid-cols-4 lg:gap-4">
           {list.map((p) => (
             <div key={p.id} className="relative rounded-2xl bg-white shadow-[0_1px_8px_rgba(0,0,0,0.08)]">
               <button className="block w-full text-left" onClick={() => open(p)}>
@@ -426,7 +432,7 @@ export function Profile() {
               <h2 className="font-display text-[17px] font-bold">A little of my magic</h2>
               <span className="text-[12px] text-neutral-500">{all.length} photo{all.length === 1 ? '' : 's'}</span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 lg:grid-cols-4">
               {visible.map((ph, i) => (
                 <button key={ph.id} onClick={() => setLb(i)} aria-label={`Open photo ${i + 1} of ${all.length}`} className="block overflow-hidden rounded-xl">
                   <Photo src={ph.src} tone={ph.tone || ['green', 'dusk', 'cream'][i % 3]} className="h-[100px] w-full" />

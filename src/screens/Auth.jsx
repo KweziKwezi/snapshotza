@@ -21,8 +21,8 @@ export function homeFor(auth) {
 /* ---------- Sign in / create account ---------- */
 export function Auth() {
   const { back, jump, auth, state, set } = useApp()
-  const [mode, setMode] = useState('signup') // 'signin' | 'signup'
-  const [role, setRole] = useState('client')
+  const [mode, setMode] = useState(state.authMode === 'signin' ? 'signin' : 'signup') // 'signin' | 'signup'
+  const [role, setRole] = useState(state.signupRole === 'photographer' ? 'photographer' : 'client')
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [phoneTouched, setPhoneTouched] = useState(false)

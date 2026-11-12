@@ -26,6 +26,9 @@ const initial = {
   selected: null, // live marketplace: { p, packages, portfolio, reviews } for the photographer being viewed
   reservation: null, // the booking just created (awaiting payment)
   afterAuth: null, // screen to return to once the user has signed in
+  signupRole: null, // 'photographer' when arriving from "Join as a photographer"
+  authMode: null, // 'signin' when arriving from a Sign in link
+  homeCategory: null, // a style chosen on the landing page
   // photographer
   studio: {
     name: 'Thabo Mokoena',

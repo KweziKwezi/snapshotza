@@ -146,6 +146,7 @@ export function Segmented({ options, value, onChange }) {
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
           className={`h-12 flex-1 rounded-2xl text-[14px] font-semibold ${value === o.value ? 'bg-ink text-white' : 'bg-surface text-ink'}`}
         >
           {o.label}

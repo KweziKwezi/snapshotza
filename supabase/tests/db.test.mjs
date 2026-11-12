@@ -674,5 +674,11 @@ await raises('...and so is fast-forwarding', asP2(`select * from simulate_shoot_
 await raises('...and test delivery', asP2(`select * from simulate_delivery($1)`, [ob.id]), /switched off/)
 await su(`update platform_settings set simulate_payments=true`)
 
+console.log('\n# Withdrawals need a verified bank account')
+await su(`update photographer_profiles set bank_verified=false where id=$1`, [pid2])
+await raises('no withdrawal while the bank account is unverified', asP2(`select * from request_withdrawal()`), /add and verify your bank details/)
+await su(`update photographer_profiles set bank_verified=true where id=$1`, [pid2])
+eq('a suspended or unapproved photographer cannot withdraw either', await as(user(p1), `select * from request_withdrawal()`).then(() => 'allowed').catch((e) => (/verify your bank/.test(e.message) ? 'blocked' : e.message)), 'blocked')
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

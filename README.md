@@ -54,7 +54,7 @@ Verification is now step 5 of 5.
 npm run test:db
 ```
 Loads migrations 1-3 into an in-process Postgres (PGlite) with a stub of Supabase's `auth` schema and roles, then
-runs the full lifecycle as different users (309 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
+runs the full lifecycle as different users (311 checks): sign-up, onboarding, booking, payment webhook, chat, all three payout
 tiers, the review window, auto-promotion, all cancellation cases, disputes, and that each role can only see and do what it should.
 Migration 4 (storage, pg_cron) needs real Supabase and is **not** covered by this test.
 

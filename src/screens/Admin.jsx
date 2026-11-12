@@ -524,3 +524,61 @@ export function AdminPayouts() {
     </Screen>
   )
 }
+
+/* ---------- Bank details waiting for a re-check ---------- */
+export function AdminBanks() {
+  const isAdmin = useAdminGuard()
+  const { jump } = useApp()
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState('')
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      setItems(await market.listBankChecks())
+    } catch (e) {
+      setError(api.explain(e))
+      setItems([])
+    }
+  }, [])
+  useEffect(() => { if (isAdmin) load() }, [isAdmin, load])
+  if (!isAdmin) return <NotAdmin />
+  const verify = async (id) => {
+    setBusy(id)
+    setError('')
+    try {
+      await market.verifyBank(id)
+      await load()
+    } catch (e) {
+      setError(api.explain(e))
+    } finally {
+      setBusy('')
+    }
+  }
+  return (
+    <Screen footer={<Button variant="soft" arrow={false} onClick={load}>Refresh</Button>}>
+      <TopBar title="Bank checks" onBack={() => jump('account')} />
+      <div className="px-5 pb-4">
+        <p className="mt-2 text-[13px] text-neutral-500">Photographers who changed their bank details cannot withdraw until you have checked them. Make sure the account holder matches the name on their ID.</p>
+        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="mt-6 text-[13px] text-neutral-500">Loading…</p>}
+        {items?.length === 0 && !error && <Notice className="mt-5" icon={<Icon.Check size={18} />} title="All caught up">No bank details are waiting for a check.</Notice>}
+        <div className="mt-5 space-y-3">
+          {items?.map((g) => (
+            <div key={g.photographerId} className="rounded-2xl bg-surface p-4" data-testid="bank-check">
+              <div className="text-[15px] font-semibold">{g.name}</div>
+              <div className="text-[12px] text-neutral-500">{g.email}</div>
+              <div className="mt-2 rounded-xl bg-white p-3 text-[12.5px] leading-relaxed">
+                <div><span className="text-neutral-500">Bank</span> {g.bank.bank_name} · {g.bank.account_type}</div>
+                <div><span className="text-neutral-500">Account holder</span> {g.bank.account_holder}</div>
+                <div><span className="text-neutral-500">Account number</span> <b>{g.bank.account_number}</b></div>
+                {g.bank.branch_code && <div><span className="text-neutral-500">Branch code</span> {g.bank.branch_code}</div>}
+              </div>
+              <div className="mt-3"><Button disabled={busy === g.photographerId} onClick={() => verify(g.photographerId)}>{busy === g.photographerId ? 'Saving…' : 'These details are correct'}</Button></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Screen>
+  )
+}

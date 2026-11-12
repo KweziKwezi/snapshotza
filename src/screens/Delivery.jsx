@@ -85,7 +85,7 @@ export function DeliveryPanel({ b, onChanged }) {
   const uploading = queue.some((q) => q.status === 'uploading' || q.status === 'waiting')
   const pct = need ? Math.min(100, Math.round((have / need) * 100)) : 0
   return (
-    <div className="mt-3 rounded-xl bg-white p-3.5" data-testid="delivery-panel">
+    <div className="mt-3 rounded-xl bg-white p-3.5" data-testid="delivery-panel" data-uploading={uploading ? 'true' : 'false'}>
       <div className="flex items-baseline justify-between">
         <div className="text-[14px] font-semibold">Deliver the photos</div>
         <div className="text-[12.5px] text-neutral-600" data-testid="photo-count">{have} of {need} uploaded</div>

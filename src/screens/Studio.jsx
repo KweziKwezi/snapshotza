@@ -186,11 +186,24 @@ function Dashboard({ live }) {
         </div>
 
         {live && (
-          <button onClick={() => go('myPackages')} className="mt-3 flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left">
-            <Icon.Camera size={22} />
-            <div className="flex-1"><div className="text-[14px] font-semibold">My packages</div><div className="text-[12px] text-neutral-500">Edit prices, hours and photo counts</div></div>
-            <Icon.Chevron size={18} />
-          </button>
+          <section className="mt-6" aria-label="Manage your studio">
+            <h2 className="font-display text-[18px] font-bold">Manage your studio</h2>
+            <div className="mt-3 divide-y divide-white overflow-hidden rounded-2xl bg-surface">
+              {[
+                [Icon.User, 'Profile & photo', 'Name, bio, profile picture, what you shoot', 'editProfile'],
+                [Icon.Camera, 'Portfolio', 'Add, remove or reorder your photos', 'editPortfolio'],
+                [Icon.Card, 'Packages', 'Prices, hours and photo counts', 'myPackages'],
+                [Icon.Calendar, 'Hours & days', 'When clients can book you', 'availability'],
+                [Icon.Bank, 'Bank details', 'Where we send your money', 'editBank'],
+              ].map(([I, title, hint, to]) => (
+                <button key={to} onClick={() => go(to)} className="flex w-full items-center gap-3 p-4 text-left">
+                  <I size={22} />
+                  <div className="flex-1"><div className="text-[14px] font-semibold">{title}</div><div className="text-[12px] text-neutral-500">{hint}</div></div>
+                  <Icon.Chevron size={18} />
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {!state.bank && (
@@ -294,8 +307,16 @@ function Dashboard({ live }) {
 
 /* ---------- onboarding shell ---------- */
 const STEP_LABELS = ['Profile', 'Portfolio', 'Packages', 'Payouts', 'Verification']
-function Onb({ step, children, footer }) {
+function Onb({ step, children, footer, edit }) {
   const { back, jump } = useApp()
+  if (edit) {
+    return (
+      <Screen footer={footer}>
+        <TopBar title={edit} onBack={back} />
+        <div className="px-5 pb-4">{children}</div>
+      </Screen>
+    )
+  }
   return (
     <Screen footer={footer}>
       <TopBar title="Create your studio" onBack={back} right={<button onClick={() => jump('studio')} className="text-[13px] font-normal text-neutral-500">Save & exit</button>} />
@@ -306,8 +327,10 @@ function Onb({ step, children, footer }) {
 }
 
 /* ---------- 9. Step 1 — Profile ---------- */
-export function OnbProfile() {
-  const { go, set, state, auth } = useApp()
+export const OnbProfile = () => <ProfileForm />
+export const EditProfile = () => <ProfileForm edit />
+function ProfileForm({ edit = false }) {
+  const { go, back, set, state, auth } = useApp()
   const live = useLive()
   const s = state.studio
   const fileRef = useRef(null)
@@ -318,11 +341,11 @@ export function OnbProfile() {
   const valid = s.name.trim() && s.city.trim() && s.specialties.length > 0 && (!live || s.bio.trim())
 
   const next = async () => {
-    if (!live) return go('onbPortfolio')
+    if (!live) return edit ? back() : go('onbPortfolio')
     const ok = await run(() =>
       api.saveProfile({ userId: auth.user.id, photographerId: auth.photographer.id, name: s.name, city: s.city, specialties: s.specialties, bio: s.bio }),
     )
-    if (ok) go('onbPortfolio')
+    if (ok) edit ? back() : go('onbPortfolio')
   }
   const pickPhoto = async (file) => {
     if (!file) return
@@ -336,15 +359,16 @@ export function OnbProfile() {
   return (
     <Onb
       step={1}
+      edit={edit ? 'Edit profile' : undefined}
       footer={
         <>
           <ErrorNote error={error} className="mb-2" />
-          <Button disabled={!valid || busy} onClick={next}>{busy ? 'Saving…' : 'Continue to portfolio'}</Button>
+          <Button disabled={!valid || busy} onClick={next}>{busy ? 'Saving…' : edit ? 'Save changes' : 'Continue to portfolio'}</Button>
         </>
       }
     >
-      <H1 className="mt-5">Put a face to<br />your craft.</H1>
-      <p className="mt-1 text-[13px] text-neutral-500">Build a profile clients can connect with.</p>
+      <H1 className="mt-5">{edit ? <>Your profile,<br />your way.</> : <>Put a face to<br />your craft.</>}</H1>
+      <p className="mt-1 text-[13px] text-neutral-500">{edit ? 'Changes show on your public profile straight away. A new profile photo is saved as soon as you pick it.' : 'Build a profile clients can connect with.'}</p>
       <div className="mt-5 flex items-center gap-4">
         <Photo src={s.photo || (live ? null : '/photos/thabo.jpg')} tone="warm" label={s.name.split(' ').map((w) => w[0]).slice(0, 2).join('')} className="h-[72px] w-[72px] shrink-0 rounded-full" />
         <div>
@@ -376,8 +400,10 @@ export function OnbProfile() {
 /* ---------- 10. Step 2 — Portfolio ---------- */
 const MAX_PHOTOS = 12
 const TONE_CYCLE = ['green', 'dusk', 'cream', 'warm']
-export function OnbPortfolio() {
-  const { go, set, state, auth } = useApp()
+export const OnbPortfolio = () => <PortfolioForm />
+export const EditPortfolio = () => <PortfolioForm edit />
+function PortfolioForm({ edit = false }) {
+  const { go, back, set, state, auth } = useApp()
   const live = useLive()
   const photos = state.portfolio
   const fileRef = useRef(null)
@@ -420,6 +446,10 @@ export function OnbPortfolio() {
     if (live) await run(() => api.savePortfolioOrder(next))
   }
   const remove = async (id) => {
+    if (edit && photos.length <= MIN_PORTFOLIO_PHOTOS) {
+      return setErr(`Keep at least ${MIN_PORTFOLIO_PHOTOS} photos on your portfolio. Add a new one first, then remove this one.`)
+    }
+    setErr('')
     const photo = photos.find((p) => p.id === id)
     const rest = photos.filter((p) => p.id !== id)
     if (!live) return set({ portfolio: rest })
@@ -433,15 +463,16 @@ export function OnbPortfolio() {
   return (
     <Onb
       step={2}
+      edit={edit ? 'Edit portfolio' : undefined}
       footer={
         <>
           <ErrorNote error={error} className="mb-2" />
-          <Button disabled={photos.length < MIN_PORTFOLIO_PHOTOS || working} onClick={() => go('onbPackages')}>Continue to packages</Button>
+          <Button disabled={photos.length < MIN_PORTFOLIO_PHOTOS || working} onClick={() => (edit ? back() : go('onbPackages'))}>{edit ? 'Done' : 'Continue to packages'}</Button>
         </>
       }
     >
-      <H1 className="mt-5">Let your work<br />do the talking.</H1>
-      <p className="mt-1 text-[13px] text-neutral-500">Your best shots. Your signature style.</p>
+      <H1 className="mt-5">{edit ? <>Your best<br />work.</> : <>Let your work<br />do the talking.</>}</H1>
+      <p className="mt-1 text-[13px] text-neutral-500">{edit ? 'Add, remove or choose your cover photo. Every change is saved straight away.' : 'Your best shots. Your signature style.'}</p>
       <div className="mt-5 grid grid-cols-2 gap-3">
         {photos.map((ph, i) => (
           <div key={ph.id} className="relative">
@@ -586,8 +617,10 @@ export function MyPackages() {
 }
 
 /* ---------- 12. Step 4 — NEW: Payout (bank) details ---------- */
-export function Payouts() {
-  const { go, set, state, auth } = useApp()
+export const Payouts = () => <PayoutsForm />
+export const EditBank = () => <PayoutsForm edit />
+function PayoutsForm({ edit = false }) {
+  const { go, back, set, state, auth } = useApp()
   const live = useLive()
   const saved = state.bank
   const [bank, setBank] = useState(saved?.bank || '')
@@ -606,20 +639,26 @@ export function Payouts() {
       if (live) await api.saveBank(auth.photographer.id, details)
       else await new Promise((r) => setTimeout(r, 900))
     })
-    if (ok) { set({ bank: details }); go('verify') }
+    if (ok) { set({ bank: details }); edit ? back() : go('verify') }
   }
   return (
     <Onb
       step={4}
+      edit={edit ? 'Bank details' : undefined}
       footer={
         <>
           <ErrorNote error={error} className="mb-2" />
-          <Button disabled={!valid || busy} onClick={submit}>{busy ? 'Saving…' : 'Save & continue'}</Button>
+          <Button disabled={!valid || busy} onClick={submit}>{busy ? 'Saving…' : edit ? 'Save bank details' : 'Save & continue'}</Button>
         </>
       }
     >
       <H1 className="mt-5">Get paid,<br />safely.</H1>
       <p className="mt-1 text-[13px] text-neutral-500">Tell us where to send your earnings.</p>
+      {edit && live && (
+        <Notice tone="cream" className="mt-4" icon={<Icon.Shield size={18} />} title="Changing these pauses withdrawals">
+          For your protection, our team re-checks new bank details before you can withdraw to them. Money you have earned stays safe in the meantime.
+        </Notice>
+      )}
 
       <Notice icon={<Icon.Lock size={18} />} className="mt-4" title="Your bank details. Protected.">
         Used only to pay you. Never shown on your profile or to clients.

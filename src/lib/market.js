@@ -453,3 +453,27 @@ export async function deliveryRequired(bookingId, fallback = 0) {
   const res = await supabase.rpc('delivery_required', { p_booking: bookingId })
   return res.error || res.data == null ? fallback : Number(res.data)
 }
+
+/* ------------------------------------- admin: bank details to re-check */
+/** Approved photographers whose bank details changed and have not been re-checked yet (they cannot withdraw until then). */
+export async function listBankChecks() {
+  const ph = await supabase.from('photographer_profiles').select('id, user_id').eq('verification_status', 'approved').eq('bank_verified', false)
+  must(ph, 'Could not load the bank checks.')
+  const rows = ph.data || []
+  if (!rows.length) return []
+  const ids = rows.map((r) => r.id)
+  const [banks, names] = await Promise.all([
+    supabase.from('payout_accounts').select('photographer_id, bank_name, account_holder, account_number, account_type, branch_code, updated_at').in('photographer_id', ids),
+    supabase.from('profiles').select('id, full_name, email').in('id', rows.map((r) => r.user_id)),
+  ])
+  const bankOf = Object.fromEntries((banks.data || []).map((b) => [b.photographer_id, b]))
+  const nameOf = Object.fromEntries((names.data || []).map((n) => [n.id, n]))
+  return rows.filter((r) => bankOf[r.id]).map((r) => ({ photographerId: r.id, name: nameOf[r.user_id]?.full_name || 'Photographer', email: nameOf[r.user_id]?.email || '', bank: bankOf[r.id] }))
+}
+export async function verifyBank(photographerId) {
+  must(await supabase.rpc('admin_verify_bank', { p_photographer: photographerId }), 'Could not verify the bank details.')
+}
+export async function bankCheckCount() {
+  const res = await supabase.from('photographer_profiles').select('id', { count: 'exact', head: true }).eq('verification_status', 'approved').eq('bank_verified', false)
+  return res.error ? 0 : res.count || 0
+}

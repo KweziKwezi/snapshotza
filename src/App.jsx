@@ -5,9 +5,10 @@ import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
-import { AdminBanks, AdminList, AdminPayouts, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
+import { AdminBanks, AdminList, AdminPayouts, AdminRefunds, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
 import { Notifications } from './screens/Notifications.jsx'
 import { Thread } from './screens/Chat.jsx'
+import { Policy } from './screens/Policy.jsx'
 import { Availability } from './screens/Calendar.jsx'
 import { Earnings, StudioBookings } from './screens/Earnings.jsx'
 import { supabaseConfigured } from './lib/supabase.js'
@@ -24,6 +25,7 @@ const SCREENS = {
   adminReports: AdminReports,
   adminPayouts: AdminPayouts,
   adminBanks: AdminBanks,
+  adminRefunds: AdminRefunds,
   adminReport: AdminReport,
   notifications: Notifications,
   home: Home,
@@ -37,6 +39,7 @@ const SCREENS = {
   bookings: BookingsRoute,
   chat: Chat,
   thread: Thread,
+  policy: Policy,
   studio: Studio,
   onbProfile: OnbProfile,
   onbPortfolio: OnbPortfolio,
@@ -65,7 +68,7 @@ const MENU = [
     ['studio', 'Studio dashboard'], ['availability', 'Hours & availability', true], ['earnings', 'Earnings & withdrawals', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['myPackages', 'My packages (edit anytime)', true], ['editProfile', 'Edit profile', true], ['editPortfolio', 'Edit portfolio', true], ['editBank', 'Edit bank details', true], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
-  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true], ['adminPayouts', 'Payouts to send', true], ['adminBanks', 'Bank checks', true]]],
+  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true], ['adminPayouts', 'Payouts to send', true], ['adminBanks', 'Bank checks', true], ['adminRefunds', 'Refunds to send', true]]],
 ]
 
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.

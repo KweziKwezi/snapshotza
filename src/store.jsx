@@ -15,6 +15,7 @@ const initial = {
   time: '14:00',
   favs: ['lerato'],
   payment: 'ozow', // 'ozow' | 'payfast'
+  rate: null, // 'flexible' | 'saver' (chosen at checkout, never pre-selected)
   bookingStage: 'shoot_done', // paid -> shoot_done -> delivered -> released
   bookingRef: 'SZ-2048',
   paid: false,

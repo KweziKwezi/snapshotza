@@ -307,6 +307,7 @@ export function AdminReports() {
                     <span className="text-[14.5px] font-semibold">{REPORT_TYPE[r.type] || r.type}</span>
                   </div>
                   <div className="mt-0.5 line-clamp-2 text-[12.5px] text-neutral-600">{r.description}</div>
+                  {r.decision_due_by && tab === 'open' && <div className="mt-0.5 text-[11.5px] font-semibold text-amber-700">Decision due {new Date(r.decision_due_by).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}</div>}
                   <div className="mt-1.5 flex items-center gap-2 text-[11px] text-neutral-400">
                     <span>{r.bookingRef}</span><span>·</span><span>{ago(r.created_at)}</span>
                     <span className={`rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${tone}`}>{label}</span>
@@ -323,8 +324,9 @@ export function AdminReports() {
 }
 
 const OUTCOMES = [
-  ['refund_client', 'Refund the client', 'Cancels the booking and refunds what has not been paid to the photographer. Unsent payments are cancelled.'],
+  ['refund_client', 'Refund the client', 'Cancels the booking and refunds the part that has not been paid out. The first payment already released stays with the photographer.'],
   ['pay_photographer', 'Pay the photographer', 'Marks the booking complete and releases the full amount to the photographer.'],
+  ['split', 'Split the decision', 'The client gets a percentage of the unpaid part back; the photographer is paid the rest.'],
   ['dismiss', 'Dismiss the report', 'No action. The booking carries on as normal and held payments are released again.'],
 ]
 
@@ -335,6 +337,7 @@ export function AdminReport() {
   const [pack, setPack] = useState(null)
   const [error, setError] = useState('')
   const [outcome, setOutcome] = useState('')
+  const [pct, setPct] = useState('50')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -353,7 +356,7 @@ export function AdminReport() {
     setBusy(true)
     setError('')
     try {
-      await market.resolveReport(id, outcome, note.trim())
+      await market.resolveReport(id, outcome, note.trim(), outcome === 'split' ? Number(pct) : null)
       setDone(true)
       await load()
     } catch (e) {
@@ -377,6 +380,15 @@ export function AdminReport() {
   const raisedByClient = r.raised_by === b.client_id
   const noShow = outcome === 'refund_client' && r.type === 'photographer_no_show'
   const paidOut = payouts.filter((p) => p.status !== 'failed').reduce((t, p) => t + Number(p.amount), 0)
+  const settled = payouts.filter((p) => p.status === 'completed' || p.status === 'processing').reduce((t, p) => t + Number(p.amount), 0)
+  const price = Number(b.package_price), net = Number(b.net_amount)
+  const fullRefund = r.type === 'photographer_no_show' ? Number(b.total_amount) - settled : Math.round((price - (paidOut * price) / net) * 100) / 100
+  const pctNum = Number(pct)
+  const splitOk = Number.isInteger(pctNum) && pctNum >= 1 && pctNum <= 99
+  const preview = outcome === 'refund_client' ? `The client will be refunded ${money(fullRefund)} (to be sent within 14 days).`
+    : outcome === 'pay_photographer' ? `The photographer will be paid ${money(net - paidOut)} more, on top of ${money(paidOut)} already released.`
+    : outcome === 'split' && splitOk ? `The client gets ${money(Math.round(fullRefund * pctNum) / 100)}; the photographer gets ${money(Math.round((net - paidOut) * (100 - pctNum)) / 100)} more.`
+    : ''
 
   return (
     <Screen>
@@ -386,14 +398,17 @@ export function AdminReport() {
           <H1 className="text-[26px]">{REPORT_TYPE[r.type] || r.type}</H1>
           <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${stone}`}>{slabel}</span>
         </div>
-        <p className="mt-1 text-[12px] text-neutral-500">Reported by the {raisedByClient ? 'client' : 'photographer'} · {ago(r.created_at)}</p>
+        <p className="mt-1 text-[12px] text-neutral-500">Reported by the {raisedByClient ? 'client' : 'photographer'} · {ago(r.created_at)}{r.decision_due_by && open ? ` · decision due ${new Date(r.decision_due_by).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}</p>
         <blockquote className="mt-3 rounded-2xl bg-surface p-4 text-[14px] leading-snug">{r.description}</blockquote>
 
         <Section title="The booking">
           <Row k="Package" v={pack.packageName} />
           <Row k="Shoot" v={`${b.shoot_date} at ${String(b.shoot_time).slice(0, 5)}`} />
           <Row k="Booking status" v={b.status.replace('_', ' ')} />
-          <Row k="Client paid" v={money(Number(b.total_amount))} />
+          <Row k="Rate" v={b.rate_type === 'saver' ? 'Saver (no refunds)' : 'Flexible'} />
+          <Row k="Client paid" v={`${money(Number(b.total_amount))}${Number(b.flex_fee) > 0 ? ` (incl. ${money(Number(b.flex_fee))} flexible fee)` : ''}`} />
+          <Row k="Package price" v={money(price)} />
+          <Row k="Photographer's net" v={money(net)} />
           <Row k="Fees (platform + gateway)" v={money(Number(b.platform_fee) + Number(b.transaction_fee))} />
           <Row k="Shoot marked complete" v={b.shoot_completed_at ? new Date(b.shoot_completed_at).toLocaleString('en-ZA') : 'No'} />
           <Row k="Client confirmed" v={b.shoot_confirmed_at ? new Date(b.shoot_confirmed_at).toLocaleString('en-ZA') : 'No'} />
@@ -431,12 +446,19 @@ export function AdminReport() {
                 </button>
               ))}
             </div>
-            {noShow && <Notice className="mt-3" tone="cream" title="The photographer will be suspended">Refunding a photographer no-show suspends the photographer and adds a strike.</Notice>}
+            {noShow && <Notice className="mt-3" tone="cream" title="The photographer gets a strike">Refunding a photographer no-show refunds everything (including the flexible fee) and gives the photographer a strike. A second strike suspends them for 30 days; a third removes them.</Notice>}
+            {outcome === 'split' && (
+              <div className="mt-3">
+                <label htmlFor="split-pct" className="block text-[12px] font-semibold text-neutral-600">Client's share of the unpaid part (%)</label>
+                <input id="split-pct" inputMode="numeric" value={pct} onChange={(e) => setPct(e.target.value.replace(/\D/g, '').slice(0, 2))} className={`${inputCls} mt-1`} />
+              </div>
+            )}
+            {preview && <p className="mt-3 rounded-xl bg-cream p-3 text-[13px] font-semibold" data-testid="decision-preview">{preview}</p>}
             <label htmlFor="decision-note" className="mt-4 block text-[12px] font-semibold text-neutral-600">Note to both people (required)</label>
             <textarea id="decision-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={500} placeholder="Why did you decide this?" className={`${inputCls} mt-1 h-auto py-2.5`} />
             {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
             <div className="mt-4">
-              <Button disabled={!outcome || note.trim().length < 5 || busy} onClick={decide}>{busy ? 'Saving…' : 'Confirm decision'}</Button>
+              <Button disabled={!outcome || note.trim().length < 5 || busy || (outcome === 'split' && !splitOk)} onClick={decide}>{busy ? 'Saving…' : 'Confirm decision'}</Button>
             </div>
           </Section>
         )}
@@ -578,6 +600,75 @@ export function AdminBanks() {
             </div>
           ))}
         </div>
+      </div>
+    </Screen>
+  )
+}
+
+/* ---------- Refunds to send (due within 14 days) ---------- */
+function RefundCard({ r, onDone }) {
+  const [ref, setRef] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const due = new Date(r.refund_due_by)
+  const days = Math.ceil((due.getTime() - Date.now()) / 86400000)
+  const late = days < 0
+  const send = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await market.markRefundSent(r.id, ref.trim())
+      await onDone()
+    } catch (e) {
+      setError(api.explain(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="rounded-2xl bg-surface p-4" data-testid="refund">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-semibold">{r.clientName}</div>
+          <div className="text-[12px] text-neutral-500">{r.clientEmail} · {r.booking_ref}</div>
+        </div>
+        <div className="font-display text-[20px] font-extrabold">{money(r.amount)}</div>
+      </div>
+      <p className={`mt-1 text-[12.5px] font-semibold ${late ? 'text-rose-700' : days <= 3 ? 'text-amber-700' : 'text-neutral-600'}`}>
+        {late ? `Overdue by ${-days} day${-days === 1 ? '' : 's'}` : `Due ${due.toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })} (${days} day${days === 1 ? '' : 's'} left)`}
+      </p>
+      <label htmlFor={`rr-${r.id}`} className="mt-3 block text-[12px] font-semibold text-neutral-600">Reference (after you have refunded the payment)</label>
+      <input id={`rr-${r.id}`} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. the payment provider's refund id" className={`${inputCls} mt-1`} />
+      {error && <p role="alert" className="mt-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+      <div className="mt-3"><Button disabled={busy} onClick={send}>{busy ? 'Saving…' : `Mark ${money(r.amount)} as refunded`}</Button></div>
+    </div>
+  )
+}
+
+export function AdminRefunds() {
+  const isAdmin = useAdminGuard()
+  const { jump } = useApp()
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      setItems((await market.listRefunds()).filter((r) => !r.refund_sent_at))
+    } catch (e) {
+      setError(api.explain(e))
+      setItems([])
+    }
+  }, [])
+  useEffect(() => { if (isAdmin) load() }, [isAdmin, load])
+  if (!isAdmin) return <NotAdmin />
+  return (
+    <Screen footer={<Button variant="soft" arrow={false} onClick={load}>Refresh</Button>}>
+      <TopBar title="Refunds to send" onBack={() => jump('account')} />
+      <div className="px-5 pb-4">
+        <p className="mt-2 text-[13px] text-neutral-500">Clients are promised their refund within 14 days of the decision. Refund each one to the original payment method, then enter the reference here. The client is told it was sent.</p>
+        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="mt-6 text-[13px] text-neutral-500">Loading…</p>}
+        {items?.length === 0 && !error && <Notice className="mt-5" icon={<Icon.Check size={18} />} title="No refunds waiting">Every refund has been sent.</Notice>}
+        <div className="mt-5 space-y-3">{items?.map((r) => <RefundCard key={r.id} r={r} onDone={load} />)}</div>
       </div>
     </Screen>
   )

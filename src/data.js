@@ -79,3 +79,6 @@ export const PAY_METHODS = [
 // Final (full-res) photos are deleted this many days after delivery. Mirrors platform_settings.gallery_retention_days.
 export const GALLERY_RETENTION_DAYS = 15
 export const CHAT_RETENTION_DAYS = 20
+export const FLEX_FEE = 150 // extra price of the Flexible rate (never refunded) - keep in step with platform_settings.flexible_fee
+export const FREE_CANCEL_HOURS = 48
+export const REFUND_DAYS = 14

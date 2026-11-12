@@ -56,7 +56,7 @@ export async function loadAccount(userId) {
   if (profile?.role === 'photographer') {
     const res = await supabase
       .from('photographer_profiles')
-      .select('id, verification_status, verification_note, tier, total_bookings, terms_accepted_at')
+      .select('id, verification_status, verification_note, tier, total_bookings, terms_accepted_at, strike_count, suspended_until')
       .eq('user_id', userId)
       .maybeSingle()
     photographer = res.data

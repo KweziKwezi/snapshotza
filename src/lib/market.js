@@ -104,10 +104,11 @@ const BOOKING_MESSAGES = [
   ['package not available', 'That package is no longer available.'],
   ['not accepting bookings', 'This photographer is not taking bookings right now.'],
   ['not authenticated', 'Please sign in to book.'],
+  ['choose the saver', 'Please choose the Saver or the Flexible rate.'],
 ]
-export async function createBooking({ packageId, date, time, gateway }) {
+export async function createBooking({ packageId, date, time, gateway, rate }) {
   const res = await supabase.rpc('create_booking', {
-    p_package_id: packageId, p_shoot_date: ymd(date.y, date.m, date.d), p_shoot_time: time, p_location: '', p_gateway: gateway,
+    p_package_id: packageId, p_shoot_date: ymd(date.y, date.m, date.d), p_shoot_time: time, p_location: '', p_gateway: gateway, p_rate: rate,
   })
   if (res.error) {
     const raw = (res.error.message || '').toLowerCase()
@@ -127,7 +128,7 @@ export async function approveGallery(bookingId) {
 /** The signed-in client's bookings, with the photographer and package names filled in. */
 export async function myBookings(userId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, gallery_expires_at, gallery_purged_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, gallery_expires_at, gallery_purged_at, total_amount, package_price, flex_fee, rate_type, date_changes, forfeited_at, refund_amount, refund_due_by, refund_sent_at, platform_fee, simulated, created_at, photographer_id, package_id')
     .eq('client_id', userId).order('created_at', { ascending: false }).limit(50)
   must(res, 'Could not load your bookings.')
   const rows = res.data || []
@@ -136,11 +137,11 @@ export async function myBookings(userId) {
   const kids = [...new Set(rows.map((r) => r.package_id))]
   const [people, packs] = await Promise.all([
     supabase.from('public_photographers').select('id, full_name, profile_photo_url').in('id', pids),
-    supabase.from('packages').select('id, name').in('id', kids),
+    supabase.from('packages').select('id, name, duration_hours').in('id', kids),
   ])
   const pm = Object.fromEntries((people.data || []).map((x) => [x.id, x]))
   const km = Object.fromEntries((packs.data || []).map((x) => [x.id, x]))
-  return rows.map((r) => ({ ...r, photographerName: pm[r.photographer_id]?.full_name || 'Photographer', packageName: km[r.package_id]?.name || 'Package' }))
+  return rows.map((r) => ({ ...r, photographerName: pm[r.photographer_id]?.full_name || 'Photographer', packageName: km[r.package_id]?.name || 'Package', hours: km[r.package_id]?.duration_hours || 2 }))
 }
 
 /* ---------------------------------------------------- TEST MODE actions */
@@ -165,9 +166,10 @@ export async function simulateDelivery(bookingId) {
 /** Bookings a photographer has received (paid or later), newest shoot first, with client and package names. */
 export async function studioBookings(photographerId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, package_price, flex_fee, net_amount, rate_type, date_changes, forfeited_at, platform_fee, transaction_fee, simulated, client_id, package_id')
     .eq('photographer_id', photographerId)
-    .in('status', ['confirmed', 'in_progress', 'gallery_uploaded', 'completed', 'disputed'])
+    .in('status', ['confirmed', 'in_progress', 'gallery_uploaded', 'completed', 'disputed', 'cancelled'])
+    .neq('payment_status', 'pending')
     .order('shoot_starts_at', { ascending: false }).limit(50)
   must(res, 'Could not load your bookings.')
   const rows = res.data || []
@@ -185,7 +187,7 @@ export async function studioBookings(photographerId) {
     clientName: cm[r.client_id]?.full_name || 'Client',
     packageName: km[r.package_id]?.name || 'Package',
     numPhotos: km[r.package_id]?.num_photos || 0,
-    net: Number(r.total_amount) - Number(r.platform_fee) - Number(r.transaction_fee),
+    net: Number(r.net_amount),
   }))
 }
 
@@ -299,7 +301,7 @@ export async function markAllRead() {
 /* ------------------------------------------------- admin: problem reports */
 export async function listReports(status = 'open') {
   const open = ['open', 'investigating']
-  let q = supabase.from('disputes').select('id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by')
+  let q = supabase.from('disputes').select('id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by, decision_due_by')
   q = status === 'open' ? q.in('status', open) : q.not('status', 'in', `(${open.join(',')})`)
   const res = await q.order('created_at', { ascending: status === 'open' }).limit(50)
   must(res, 'Could not load the reports.')
@@ -331,8 +333,8 @@ export async function loadReport(id) {
   const pprof = pu ? await supabase.from('profiles').select('id, full_name, email, phone').eq('id', pu).maybeSingle() : { data: null }
   return { report: d.data, booking: bk, client: client.data, photographer: { ...(photog.data || {}), ...(pprof.data || {}) }, payouts: pay.data || [], packageName: pack.data?.name || 'Package' }
 }
-export async function resolveReport(id, outcome, note) {
-  must(await supabase.rpc('admin_resolve_dispute', { p_dispute: id, p_outcome: outcome, p_note: note }), 'Could not save the decision.')
+export async function resolveReport(id, outcome, note, clientPct = null) {
+  must(await supabase.rpc('admin_resolve_dispute', { p_dispute: id, p_outcome: outcome, p_note: note, p_client_pct: clientPct }), 'Could not save the decision.')
 }
 
 /* ------------------------------------------- admin: real bank transfers */
@@ -509,4 +511,45 @@ export function watchMessages(bookingId, onMessage) {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `booking_id=eq.${bookingId}` }, (p) => onMessage(p.new))
     .subscribe()
   return () => { supabase.removeChannel(channel) }
+}
+
+/* ------------------------------------------------------ date changes */
+export async function requestReschedule(bookingId, date, time) {
+  const res = await supabase.rpc('request_reschedule', { p_booking: bookingId, p_date: date, p_time: time })
+  must(res, 'Could not send your date change.')
+  return res.data
+}
+export async function decideReschedule(requestId, approve, note = '') {
+  must(await supabase.rpc('decide_reschedule', { p_request: requestId, p_approve: approve, p_note: note }), 'Could not save your answer.')
+}
+export async function cancelReschedule(requestId) {
+  must(await supabase.rpc('cancel_reschedule', { p_request: requestId }), 'Could not cancel the request.')
+}
+/** Waiting date-change requests for these bookings: { bookingId: request } */
+export async function pendingReschedules(bookingIds) {
+  if (!bookingIds.length) return {}
+  const res = await supabase.from('reschedule_requests').select('id, booking_id, new_date, new_time, status, created_at')
+    .in('booking_id', bookingIds).eq('status', 'pending')
+  if (res.error) return {}
+  return Object.fromEntries((res.data || []).map((r) => [r.booking_id, r]))
+}
+
+/* ------------------------------------------------ admin: refunds to send */
+export async function listRefunds() {
+  const res = await supabase.from('bookings')
+    .select('id, booking_ref, client_id, refund_amount, refund_due_by, refund_sent_at, refund_reference, cancelled_at')
+    .gt('refund_amount', 0).order('refund_due_by', { ascending: true }).limit(100)
+  must(res, 'Could not load the refunds.')
+  const rows = res.data || []
+  if (!rows.length) return []
+  const names = await supabase.from('profiles').select('id, full_name, email').in('id', [...new Set(rows.map((r) => r.client_id))])
+  const nm = Object.fromEntries((names.data || []).map((x) => [x.id, x]))
+  return rows.map((r) => ({ ...r, clientName: nm[r.client_id]?.full_name || 'Client', clientEmail: nm[r.client_id]?.email || '', amount: Number(r.refund_amount) }))
+}
+export async function markRefundSent(bookingId, reference) {
+  must(await supabase.rpc('admin_mark_refund_sent', { p_booking: bookingId, p_reference: reference }), 'Could not mark the refund as sent.')
+}
+export async function refundCount() {
+  const res = await supabase.from('bookings').select('id', { count: 'exact', head: true }).gt('refund_amount', 0).is('refund_sent_at', null)
+  return res.error ? 0 : res.count || 0
 }

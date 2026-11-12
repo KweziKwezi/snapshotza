@@ -7,6 +7,7 @@ import { AppNav } from './Client.jsx'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import { DeliveryPanel } from './Delivery.jsx'
 import { MessageButton } from './Chat.jsx'
+import { PhotographerReschedule } from './Reschedule.jsx'
 import { Button, H1, Icon, Notice, Screen, TopBar } from '../ui.jsx'
 
 const TestTag = () => <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>
@@ -149,9 +150,10 @@ const BOOKING_STATUS = {
   gallery_uploaded: ['Photos delivered', 'bg-info text-link'],
   completed: ['Completed', 'bg-surface text-neutral-600'],
   disputed: ['Under review', 'bg-rose-50 text-rose-700'],
+  cancelled: ['Cancelled', 'bg-surface text-neutral-500'],
 }
 
-function StudioBookingCard({ b, sim, onChanged }) {
+function StudioBookingCard({ b, sim, request, onChanged }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [label, tone] = BOOKING_STATUS[b.status] || [b.status, 'bg-surface']
@@ -184,7 +186,7 @@ function StudioBookingCard({ b, sim, onChanged }) {
         </div>
       </div>
       <div className="mt-3 flex items-end justify-between text-[12px] text-neutral-500">
-        <span>{b.booking_ref}<br />Client paid {money(Number(b.total_amount))} · fees {money(Number(b.platform_fee) + Number(b.transaction_fee))}</span>
+        <span>{b.booking_ref}<br />Package {money(Number(b.package_price))} · fees {money(Number(b.platform_fee) + Number(b.transaction_fee))} · {b.rate_type === 'saver' ? 'Saver' : 'Flexible'} rate</span>
         <span className="text-right text-[11px]">You earn<br /><b className="font-display text-[17px] text-ink">{money(b.net)}</b></span>
       </div>
 
@@ -222,6 +224,14 @@ function StudioBookingCard({ b, sim, onChanged }) {
           )}
         </>
       )}
+      {b.status === 'confirmed' && <PhotographerReschedule b={b} request={request} onChanged={onChanged} />}
+      {b.status === 'cancelled' && b.forfeited_at && b.payment_status === 'held' && (
+        <p className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">
+          The client cancelled with no refund, so you keep your full earnings. <b>{money(b.net)}</b> is released to you once the shoot date has passed.
+        </p>
+      )}
+      {b.status === 'cancelled' && b.forfeited_at && b.payment_status === 'fully_released' && <p className="mt-3 text-[12px] text-neutral-600">The client cancelled with no refund. Your full earnings were released. Withdraw them from Earnings.</p>}
+      {b.status === 'cancelled' && !b.forfeited_at && b.payment_status === 'refunded' && <p className="mt-3 text-[12px] text-neutral-600">This booking was cancelled and refunded to the client.</p>}
       {b.status === 'disputed' && <p className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">A problem was reported on this booking. Any payment that hasn’t been withdrawn is on hold while our team reviews it.</p>}
       {b.status === 'gallery_uploaded' && <p className="mt-3 text-[12px] text-neutral-600">Waiting for the client to approve. The rest is released when they approve, or automatically after 48 hours.</p>}
       {testable && b.status === 'gallery_uploaded' && <Button className="mt-2.5" variant="dark" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 48-hour wait'}</Button>}
@@ -238,13 +248,16 @@ export function StudioBookings() {
   const pid = auth.photographer?.id
   const approved = auth.photographer?.verification_status === 'approved'
   const [items, setItems] = useState(null)
+  const [requests, setRequests] = useState({})
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     if (!pid) return
     setError('')
     try {
-      setItems(await market.studioBookings(pid))
+      const list = await market.studioBookings(pid)
+      setItems(list)
+      setRequests(await market.pendingReschedules(list.filter((x) => x.status === 'confirmed').map((x) => x.id)))
     } catch (e) {
       setError(explain(e))
       setItems([])
@@ -266,7 +279,7 @@ export function StudioBookings() {
           <Notice className="mt-5" icon={<Icon.Calendar size={18} />} title="No bookings yet">When a client books and pays, it shows up here. Make sure you’ve opened some days in your calendar.</Notice>
         )}
         <div className="mt-5 space-y-3 pb-5">
-          {items?.map((b) => <StudioBookingCard key={b.id} b={b} sim={state.sim} onChanged={load} />)}
+          {items?.map((b) => <StudioBookingCard key={b.id} b={b} sim={state.sim} request={requests[b.id]} onChanged={load} />)}
         </div>
       </div>
     </Screen>

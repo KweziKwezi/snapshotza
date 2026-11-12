@@ -100,7 +100,7 @@ for (const t of ['sa_id_front', 'sa_id_back', 'selfie']) {
 await as(user(p1), `select * from submit_for_verification()`)
 eq('status is pending_verification', (await su(`select verification_status s from photographer_profiles where id=$1`, [pid])).rows[0].s, 'pending_verification')
 eq('pending photographer is hidden from public', (await as(anon, `select count(*)::int n from public_photographers`)).rows[0].n, 0)
-await raises('cannot book an unapproved photographer', as(user(c1), `select * from create_booking($1,$2,'14:00','Cape Town','ozow')`, [pk.Gold, await dayPlus(10)]), /not accepting bookings/)
+await raises('cannot book an unapproved photographer', as(user(c1), `select * from create_booking($1,$2,'14:00','Cape Town','ozow','saver')`, [pk.Gold, await dayPlus(10)]), /not accepting bookings/)
 await raises('a client cannot approve photographers', as(user(c1), `select * from admin_review_photographer($1,true,'')`, [pid]), /admins only/)
 await as(user(adminId), `select * from admin_review_photographer($1,true,'')`, [pid])
 const pub = await as(anon, `select * from public_photographers`)
@@ -123,7 +123,7 @@ const open = async (n) => { const d = await dayPlus(n); await as(user(p1), `inse
 let ref = 100
 const bookAndPay = async (client, pkg, offset, time = '14:00') => {
   const d = await open(offset)
-  const b = (await as(user(client), `select * from create_booking($1,$2,$3,'Cape Town','ozow')`, [pkg, d, time])).rows[0]
+  const b = (await as(user(client), `select * from create_booking($1,$2,$3,'Cape Town','ozow','saver')`, [pkg, d, time])).rows[0]
   await as(svc, `select * from confirm_payment($1,'ozow',$2,$3)`, [b.id, `REF-${++ref}`, b.total_amount])
   return b.id
 }
@@ -131,25 +131,25 @@ const getB = async (id) => (await su(`select * from bookings where id=$1`, [id])
 const shiftEnded = (id, hoursAgo) => su(`update bookings set shoot_ends_at = now() - make_interval(hours => $2), shoot_starts_at = now() - make_interval(hours => $2 + 2), shoot_completed_at = now() - make_interval(hours => $2) where id=$1`, [id, hoursAgo])
 const payouts = async (id) => (await su(`select type, amount::text, status from payouts where booking_id=$1 order by created_at, type`, [id])).rows
 
-await raises('cannot book a day the photographer has not opened', as(user(c1), `select * from create_booking($1,$2,'14:00','x','ozow')`, [pk.Gold, await dayPlus(11)]), /not available on this date/)
+await raises('cannot book a day the photographer has not opened', as(user(c1), `select * from create_booking($1,$2,'14:00','x','ozow','saver')`, [pk.Gold, await dayPlus(11)]), /not available on this date/)
 const d1 = await open(10)
-const b1 = (await as(user(c1), `select * from create_booking($1,$2,'14:00','Cape Town','ozow')`, [pk.Gold, d1])).rows[0]
+const b1 = (await as(user(c1), `select * from create_booking($1,$2,'14:00','Cape Town','ozow','saver')`, [pk.Gold, d1])).rows[0]
 eq('booking ref', b1.booking_ref, 'SZ-1001')
 eq('status pending', b1.status, 'pending')
-eq('platform fee 5%', b1.platform_fee, '225.00')
-eq('gateway fee 3.5%', b1.transaction_fee, '157.50')
+eq('platform fee 7%', b1.platform_fee, '315.00')
+eq('payment fee 2.9% + R1', b1.transaction_fee, '131.50')
 eq('tier snapshot', b1.tier_at_booking, 1)
-eq('Tier 1 deposit is 30% of net (4117.50)', b1.deposit_amount, '1235.25')
-await raises('slot is held while payment is pending', as(user(c2), `select * from create_booking($1,$2,'15:00','x','ozow')`, [pk.Silver, d1]), /already booked/)
+eq('Tier 1 deposit is 30% of net (4053.50)', b1.deposit_amount, '1216.05')
+await raises('slot is held while payment is pending', as(user(c2), `select * from create_booking($1,$2,'15:00','x','ozow','saver')`, [pk.Silver, d1]), /already booked/)
 await raises('clients cannot call confirm_payment', as(user(c1), `select * from confirm_payment($1,'ozow','FAKE',4500)`, [b1.id]), /permission denied/)
-await raises('anon cannot create bookings', as(anon, `select * from create_booking($1,$2,'14:00','x','ozow')`, [pk.Gold, d1]), /permission denied/)
+await raises('anon cannot create bookings', as(anon, `select * from create_booking($1,$2,'14:00','x','ozow','saver')`, [pk.Gold, d1]), /permission denied/)
 await raises('wrong amount is rejected', as(svc, `select * from confirm_payment($1,'ozow','REF-X',100)`, [b1.id]), /amount mismatch/)
 await as(svc, `select * from confirm_payment($1,'ozow','REF-1',4500)`, [b1.id])
 await as(svc, `select * from confirm_payment($1,'ozow','REF-1',4500)`, [b1.id])
 const b1row = await getB(b1.id)
 eq('booking confirmed', b1row.status, 'confirmed')
 eq('funds held in escrow', b1row.payment_status, 'held')
-const bOther = (await as(user(c2), `select * from create_booking($1,$2,'09:00','x','ozow')`, [pk.Silver, await open(13)])).rows[0]
+const bOther = (await as(user(c2), `select * from create_booking($1,$2,'09:00','x','ozow','saver')`, [pk.Silver, await open(13)])).rows[0]
 await raises('a gateway reference cannot be reused for another booking',
   as(svc, `select * from confirm_payment($1,'ozow','REF-1',$2)`, [bOther.id, bOther.total_amount]), /already used for another booking/)
 eq('that booking stays unpaid', (await getB(bOther.id)).status, 'pending')
@@ -161,7 +161,7 @@ eq('other client cannot see the booking', (await as(user(c2), `select * from boo
 eq('photographer sees the booking', (await as(user(p1), `select * from bookings where id=$1`, [b1.id])).rows.length, 1)
 eq('contact details unlock after payment (client)', (await as(user(c1), `select * from profiles where id=$1`, [p1])).rows.length, 1)
 eq('contact details stay hidden from other clients', (await as(user(c2), `select * from profiles where id=$1`, [p1])).rows.length, 0)
-await raises('blocked slot after payment', as(user(c2), `select * from create_booking($1,$2,'15:00','x','ozow')`, [pk.Silver, d1]), /already booked/)
+await raises('blocked slot after payment', as(user(c2), `select * from create_booking($1,$2,'15:00','x','ozow','saver')`, [pk.Silver, d1]), /already booked/)
 
 console.log('\n# Chat')
 eq('system message posted on payment', (await as(user(c1), `select * from chat_messages where message_type='system'`)).rows.length, 1)
@@ -185,7 +185,7 @@ eq('deposit released 25h after the shoot', (await as(svc, `select process_due_pa
 const b1dep = await getB(b1.id)
 eq('status in_progress after deposit', b1dep.status, 'in_progress')
 eq('partially released', b1dep.payment_status, 'partially_released')
-eq('Tier 1 deposit payout = 30% of net', (await payouts(b1.id)).map((p) => p.amount).join(','), '1235.25')
+eq('Tier 1 deposit payout = 30% of net', (await payouts(b1.id)).map((p) => p.amount).join(','), '1216.05')
 eq('cron is idempotent', (await as(svc, `select process_due_payouts() n`)).rows[0].n, 0)
 await raises('cannot deliver without photos', as(user(p1), `select * from deliver_gallery($1)`, [b1.id]), /upload all 100 edited photos/)
 for (let i = 0; i < 5; i++) await as(user(p1), `insert into photos (photographer_id,booking_id,url,is_proof) values ($1,$2,'https://img.test/proof.jpg',true)`, [pid, b1.id])
@@ -204,8 +204,8 @@ const b1done = await getB(b1.id)
 eq('booking completed', b1done.status, 'completed')
 eq('payment fully released', b1done.payment_status, 'fully_released')
 const po1 = await payouts(b1.id)
-eq('two payouts: 30% deposit + remainder', po1.map((p) => p.amount).join(','), '1235.25,2882.25')
-eq('payouts add up to net (4500 - 225 - 157.50)', po1.reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4117.50')
+eq('two payouts: 30% deposit + remainder', po1.map((p) => p.amount).join(','), '1216.05,2837.45')
+eq('payouts add up to net (4500 - 315 - 131.50)', po1.reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4053.50')
 eq('photographer sees own payouts', (await as(user(p1), `select * from payouts where booking_id=$1`, [b1.id])).rows.length, 2)
 eq('client cannot see payouts', (await as(user(c1), `select * from payouts`)).rows.length, 0)
 eq('completed bookings counted', (await su(`select total_bookings n from photographer_profiles where id=$1`, [pid])).rows[0].n, 1)
@@ -224,14 +224,14 @@ console.log('\n# Final payout after the 48h review window (client never responds
 const bAuto = await bookAndPay(c1, pk.Silver, 12)
 await shiftEnded(bAuto, 24 * 10)
 eq('deposit released', (await as(svc, `select process_due_payouts() n`)).rows[0].n, 1)
-eq('deposit = 30% of net 2287.50', (await payouts(bAuto)).map((p) => p.amount).join(','), '686.25')
+eq('deposit = 30% of net 2251.50', (await payouts(bAuto)).map((p) => p.amount).join(','), '675.45')
 await addFinals(bAuto, 40)
 await as(user(p1), `select * from deliver_gallery($1)`, [bAuto])
 await su(`update bookings set gallery_uploaded_at = now() - interval '30 hours' where id=$1`, [bAuto])
 eq('still held at 30h', (await as(svc, `select process_due_payouts() n`)).rows[0].n, 0)
 await su(`update bookings set gallery_uploaded_at = now() - interval '50 hours' where id=$1`, [bAuto])
 eq('released at 50h', (await as(svc, `select process_due_payouts() n`)).rows[0].n, 1)
-eq('payouts add up to net', (await payouts(bAuto)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '2287.50')
+eq('payouts add up to net', (await payouts(bAuto)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '2251.50')
 eq('booking completed', (await getB(bAuto)).status, 'completed')
 await as(user(c1), `select * from submit_review($1,5,'Great')`, [bAuto])
 
@@ -261,14 +261,14 @@ console.log('\n# Tier 2 payout: 40% deposit')
 const bT2 = await bookAndPay(c1, pk.Gold, 30)
 const t2 = await getB(bT2)
 eq('Tier 2 snapshot on booking', t2.tier_at_booking, 2)
-eq('Tier 2 deposit is 40% of net', t2.deposit_amount, '1647.00')
+eq('Tier 2 deposit is 40% of net', t2.deposit_amount, '1621.40')
 await shiftEnded(bT2, 25)
 await as(svc, `select process_due_payouts()`)
-eq('Tier 2 deposit paid', (await payouts(bT2)).map((p) => p.amount).join(','), '1647.00')
+eq('Tier 2 deposit paid', (await payouts(bT2)).map((p) => p.amount).join(','), '1621.40')
 await addFinals(bT2, 100)
 await as(user(p1), `select * from deliver_gallery($1)`, [bT2])
 await as(user(c1), `select * from approve_gallery($1)`, [bT2])
-eq('Tier 2 payouts add up to net', (await payouts(bT2)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4117.50')
+eq('Tier 2 payouts add up to net', (await payouts(bT2)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4053.50')
 await as(user(c1), `select * from submit_review($1,5,'Wow')`, [bT2])
 for (let i = 0; i < 4; i++) {
   await complete(c1, 31 + i)
@@ -281,38 +281,64 @@ console.log('\n# Tier 3 payout: 50% deposit')
 const bT3 = await bookAndPay(c1, pk.Gold, 35)
 const t3 = await getB(bT3)
 eq('Tier 3 snapshot on booking', t3.tier_at_booking, 3)
-eq('Tier 3 deposit is 50% of net', t3.deposit_amount, '2058.75')
+eq('Tier 3 deposit is 50% of net', t3.deposit_amount, '2026.75')
 await shiftEnded(bT3, 25)
 await as(svc, `select process_due_payouts()`)
-eq('Tier 3 deposit paid', (await payouts(bT3)).map((p) => p.amount).join(','), '2058.75')
+eq('Tier 3 deposit paid', (await payouts(bT3)).map((p) => p.amount).join(','), '2026.75')
 await addFinals(bT3, 100)
 await as(user(p1), `select * from deliver_gallery($1)`, [bT3])
 await as(user(c1), `select * from approve_gallery($1)`, [bT3])
-eq('Tier 3 payouts add up to net', (await payouts(bT3)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4117.50')
+eq('Tier 3 payouts add up to net', (await payouts(bT3)).reduce((t, p) => t + Number(p.amount), 0).toFixed(2), '4053.50')
 eq('tier never exceeds 3', await tierOf(), 3)
 
 console.log('\n# Cancellation policy')
-const bCa = await bookAndPay(c1, pk.Gold, 40)
-await as(user(c2), `select 1`)
+const bookRate = async (client, pkg, offset, rate, time = '14:00') => {
+  const d = await open(offset)
+  const b = (await as(user(client), `select * from create_booking($1,$2,$3,'Cape Town','ozow',$4)`, [pkg, d, time, rate])).rows[0]
+  await as(svc, `select * from confirm_payment($1,'ozow',$2,$3)`, [b.id, `REF-${++ref}`, b.total_amount])
+  return b.id
+}
+// Saver rate: no refund, ever. The photographer is paid their full net once the shoot date has passed.
+const bCa = await bookRate(c1, pk.Gold, 40, 'saver')
 await raises('stranger cannot cancel', as(user(c2), `select * from cancel_booking($1,'x')`, [bCa]), /not allowed/)
+eq('Saver rate: the client pays the package price only', (await getB(bCa)).total_amount, '4500.00')
 const ca = (await as(user(c1), `select * from cancel_booking($1,'plans changed')`, [bCa])).rows[0]
-eq('>48h: refunded', ca.payment_status, 'refunded')
-eq('>48h: refund = total - platform fee', ca.refund_amount, '4275.00')
-eq('>48h: no payout', (await payouts(bCa)).length, 0)
+eq('Saver: cancelled, no refund', `${ca.status}/${ca.refund_amount}`, 'cancelled/0.00')
+eq('Saver: the money stays held until the shoot date has passed', `${ca.payment_status}/${(await payouts(bCa)).length}`, 'held/0')
+await shiftEnded(bCa, 1)
+await as(svc, `select process_due_payouts()`)
+eq('Saver: after the shoot date the photographer is paid the full net', (await payouts(bCa)).map((p) => p.amount).join(','), '4053.50')
+eq('...and the booking is fully released', (await getB(bCa)).payment_status, 'fully_released')
+
+// Flexible rate: package price + R150. Full refund of the package price 48h+ ahead; the R150 is kept.
+const bFx = await bookRate(c1, pk.Gold, 41, 'flexible')
+eq('Flexible rate: price + R150, the net is unchanged', `${(await getB(bFx)).total_amount}/${(await getB(bFx)).flex_fee}/${(await getB(bFx)).net_amount}`, '4650.00/150.00/4053.50')
+const fx = (await as(user(c1), `select * from cancel_booking($1,'plans changed')`, [bFx])).rows[0]
+eq('Flexible >48h: refunded', fx.payment_status, 'refunded')
+eq('Flexible >48h: refund = the package price (the R150 is kept)', fx.refund_amount, '4500.00')
+eq('Flexible >48h: the refund is due within 14 days', (await su(`select (refund_due_by > now() + interval '13 days 23 hours' and refund_due_by < now() + interval '14 days 1 hour') ok from bookings where id=$1`, [bFx])).rows[0].ok, true)
+eq('Flexible >48h: the photographer gets nothing', (await payouts(bFx)).length, 0)
+eq('...and the client is told', (await su(`select count(*)::int n from chat_messages where booking_id=$1 and content like '%refund of R4,500.00%'`, [bFx])).rows[0].n, 1)
+
 const dTmr = await open(1)
-const bLate = (await as(user(c1), `select * from create_booking($1,$2,'12:00','x','ozow')`, [pk.Gold, dTmr])).rows[0]
-await as(svc, `select * from confirm_payment($1,'ozow','REF-LATE',4500)`, [bLate.id])
+const bLate = (await as(user(c1), `select * from create_booking($1,$2,'12:00','x','ozow','flexible')`, [pk.Gold, dTmr])).rows[0]
+await as(svc, `select * from confirm_payment($1,'ozow','REF-LATE',4650)`, [bLate.id])
 const late = (await as(user(c1), `select * from cancel_booking($1,'sorry')`, [bLate.id])).rows[0]
-eq('<48h: deposit forfeited to photographer', late.payment_status, 'fully_released')
-eq('<48h: no refund', late.refund_amount, '0.00')
-eq('<48h: photographer payout = net', (await payouts(bLate.id)).map((p) => p.amount).join(','), '4117.50')
-const bPc = await bookAndPay(c1, pk.Gold, 41)
+eq('Flexible <48h: no refund', `${late.refund_amount}/${late.payment_status}`, '0.00/held')
+await shiftEnded(bLate.id, 1)
+await as(svc, `select process_due_payouts()`)
+eq('Flexible <48h: the photographer is paid the full net after the shoot date', (await payouts(bLate.id)).map((p) => p.amount).join(','), '4053.50')
+
+// The photographer cancels: everything comes back, including the flexible fee, and they get a strike.
+const bPc = await bookRate(c1, pk.Gold, 44, 'flexible')
 const pc = (await as(user(p1), `select * from cancel_booking($1,'ill')`, [bPc])).rows[0]
-eq('photographer cancels: full refund', pc.refund_amount, '4500.00')
+eq('photographer cancels: 100% back, including the flexible fee', pc.refund_amount, '4650.00')
 eq('photographer cancels: strike recorded', (await su(`select strike_count n from photographer_profiles where id=$1`, [pid])).rows[0].n, 1)
-const bPend = (await as(user(c1), `select * from create_booking($1,$2,'09:00','x','payfast')`, [pk.Silver, await open(42)])).rows[0]
+eq('...the first strike is only a warning', (await su(`select verification_status s from photographer_profiles where id=$1`, [pid])).rows[0].s, 'approved')
+eq('...and they are told', (await su(`select count(*)::int n from notifications where user_id=$1 and type='strike'`, [p1])).rows[0].n, 1)
+const bPend = (await as(user(c1), `select * from create_booking($1,$2,'09:00','x','payfast','saver')`, [pk.Silver, await open(42)])).rows[0]
 eq('unpaid booking can be cancelled', (await as(user(c1), `select * from cancel_booking($1,'')`, [bPend.id])).rows[0].status, 'cancelled')
-eq('cancelled slot is free again', (await as(user(c2), `select * from create_booking($1,$2,'09:00','x','payfast')`, [pk.Silver, await dayPlus(42)])).rows.length, 1)
+eq('cancelled slot is free again', (await as(user(c2), `select * from create_booking($1,$2,'09:00','x','payfast','saver')`, [pk.Silver, await dayPlus(42)])).rows.length, 1)
 
 console.log('\n# Bank-detail changes require re-verification')
 eq('bank verified before edit', (await su(`select bank_verified b from photographer_profiles where id=$1`, [pid])).rows[0].b, true)
@@ -391,7 +417,7 @@ eq('no-show: full refund', bDr.refund_amount, '4500.00')
 eq('no-show: payment refunded', bDr.payment_status, 'refunded')
 eq('no-show: photographer suspended', (await su(`select verification_status s from photographer_profiles where id=$1`, [pid])).rows[0].s, 'suspended')
 eq('suspended photographer disappears from search', (await as(anon, `select * from public_photographers`)).rows.length, 0)
-await raises('cannot book a suspended photographer', as(user(c2), `select * from create_booking($1,$2,'10:00','x','ozow')`, [pk.Silver, await dayPlus(60)]), /not accepting bookings|not available/)
+await raises('cannot book a suspended photographer', as(user(c2), `select * from create_booking($1,$2,'10:00','x','ozow','saver')`, [pk.Silver, await dayPlus(60)]), /not accepting bookings|not available/)
 
 console.log('\n# Function privileges')
 await raises('clients cannot run the payout job', as(user(c1), `select process_due_payouts()`), /permission denied/)
@@ -403,7 +429,7 @@ eq('direct booking updates change nothing', (await getB(bD)).payment_status, 're
 await raises('clients cannot insert payouts', as(user(c1), `insert into payouts (photographer_id,booking_id,amount,type) values ($1,$2,1,'final_release')`, [pid, bD]), /permission denied/)
 eq('client fee update affects no rows', (await as(user(c1), `update platform_settings set platform_fee_rate=0`)).affectedRows, 0)
 await as(user(adminId), `update platform_settings set review_window_hours=48`)
-eq('fee settings unchanged', (await su(`select platform_fee_rate::text r from platform_settings`)).rows[0].r, '0.0500')
+eq('fee settings unchanged', (await su(`select platform_fee_rate::text r from platform_settings`)).rows[0].r, '0.0700')
 
 console.log('\n# Onboarding writes exactly as the app sends them, then admin review')
 const p2 = await mkUser('lerato@test.za', 'photographer', 'Lerato Nkosi')
@@ -516,7 +542,7 @@ eq('a client cannot read the raw calendar table', (await as(user(c2), `select * 
 // clients browse the calendar through get_open_days / get_free_slots (free start times for a shoot of N hours)
 const openDays = async (who, hours = 4, ph = pid2) => (await as(who, `select day::text d, free_slots n, start_time::text s, end_time::text e from get_open_days($1,$2,$3,$4) order by day`, [ph, d1m, d3m, hours])).rows
 const slots = async (who, day, hours, ph = pid2) => (await as(who, `select t::text s from get_free_slots($1,$2,$3) t`, [ph, day, hours])).rows.map((r) => r.s.slice(0, 5))
-const book = (who, pkg, day, time) => as(who, `select * from create_booking($1,$2,$3,'','ozow')`, [pkg, day, time])
+const book = (who, pkg, day, time) => as(who, `select * from create_booking($1,$2,$3,'','ozow','saver')`, [pkg, day, time])
 eq('anonymous visitors see exactly the open days', (await openDays(anon)).map((r) => r.d).join(','), [d1m, d2m, d3m].join(','))
 eq('...with the usual hours 08:00-18:00', (await openDays(anon))[0].s + '-' + (await openDays(anon))[0].e, '08:00:00-18:00:00')
 eq('4-hour shoot: 13 start times, 08:00 to 14:00', `${(await slots(anon, d1m, 4)).length} ${(await slots(anon, d1m, 4))[0]}..${(await slots(anon, d1m, 4)).pop()}`, '13 08:00..14:00')
@@ -570,7 +596,7 @@ await asP2(`update photographer_profiles set work_start='08:00', work_end='18:00
 await raises('a client cannot change a photographer\'s hours', as(user(c2), `update photographer_profiles set work_start='00:00' where id=$1`, [pid2]).then((r) => { if (!r.affectedRows) throw new Error('row-level security: 0 rows') }), /row-level security/)
 
 await raises('a day the photographer has not opened is refused', book(user(c1), pk2[1], await dayPlus(55), '14:00'), /not available on this date/)
-await raises('a photographer account cannot book', asP2(`select * from create_booking($1,$2,'14:00','','ozow')`, [pk2[1], d2m]), /only clients can make bookings/)
+await raises('a photographer account cannot book', asP2(`select * from create_booking($1,$2,'14:00','','ozow','saver')`, [pk2[1], d2m]), /only clients can make bookings/)
 const mine = (await as(user(c2), `select id, booking_ref, status, shoot_date::text d, shoot_time::text t, total_amount, photographer_id, package_id from bookings where client_id=$1 and id=$2`, [c2, fav.id])).rows[0]
 eq('the client\'s booking list includes it', mine.id, fav.id)
 eq('stored date/time are what was chosen', `${mine.d} ${mine.t}`, `${d1m} 14:00:00`)
@@ -613,34 +639,34 @@ eq('the payment record is clearly marked', `${pay.r.startsWith('SIM-')}/${pay.s}
 eq('the chat opens with a system message', (await as(user(c1), `select * from chat_messages where booking_id=$1 and message_type='system'`, [sb.id])).rows.length, 1)
 await raises('cannot pay twice', as(user(c1), `select * from simulate_payment($1)`, [sb.id]), /not awaiting payment/)
 const earn = async () => (await asP2(`select available::text a, processing::text p, paid_out::text o, in_escrow::text e, earned_this_month::text m from my_earnings()`)).rows[0]
-eq('paid money is in escrow for the photographer (2500 - 125 - 87.50)', `${(await earn()).e}/${(await earn()).a}`, '2287.50/0')
+eq('paid money is in escrow for the photographer (2500 - 175 - 73.50)', `${(await earn()).e}/${(await earn()).a}`, '2251.50/0')
 await raises('a stranger cannot fast-forward', as(user(c2), `select * from simulate_shoot_over($1)`, [sb.id]), /not allowed/)
 await raises('delivery needs the shoot to have happened first', asP2(`select * from simulate_delivery($1)`, [sb.id]), /jump to after the shoot first/)
 await raises('the photographer cannot mark it complete before it starts', asP2(`select * from mark_shoot_complete($1)`, [sb.id]), /once it has started/)
 await raises('the client cannot confirm before it starts', as(user(c1), `select * from confirm_shoot($1)`, [sb.id]), /once it has started/)
 const over = (await as(user(c1), `select * from simulate_shoot_over($1)`, [sb.id])).rows[0]
 eq('jump to after the shoot: still confirmed, in the past', `${over.status}/${new Date(over.shoot_starts_at) < new Date()}`, 'confirmed/true')
-eq('...nothing is paid yet', `${(await earn()).a}/${(await earn()).e}`, '0/2287.50'.replace('0/','0.00/').replace('0.00/','0/'))
+eq('...nothing is paid yet', `${(await earn()).a}/${(await earn()).e}`, '0/2251.50'.replace('0/','0.00/').replace('0.00/','0/'))
 const marked = (await asP2(`select * from mark_shoot_complete($1)`, [sb.id])).rows[0]
 eq('photographer marks complete: waits for the client', `${marked.status}/${marked.shoot_completed_at !== null}/${marked.deposit_released_at}`, 'confirmed/true/null')
 await raises('a stranger cannot confirm', as(user(c2), `select * from confirm_shoot($1)`, [sb.id]), /not allowed/)
 await raises('the photographer cannot confirm for the client', asP2(`select * from confirm_shoot($1)`, [sb.id]), /not allowed/)
 const done = (await as(user(c1), `select * from confirm_shoot($1)`, [sb.id])).rows[0]
 eq('client confirms: in progress, deposit released', done.status, 'in_progress')
-eq('Tier 1 deposit is 30% of net, available to withdraw', `${(await earn()).a}/${(await earn()).e}`, '686.25/1601.25')
+eq('Tier 1 deposit is 30% of net, available to withdraw', `${(await earn()).a}/${(await earn()).e}`, '675.45/1576.05')
 eq('the payout is flagged as a test payout', (await su(`select simulated s from payouts where booking_id=$1`, [sb.id])).rows[0].s, true)
 await raises('fast-forwarding after it is in progress is refused', asP2(`select * from simulate_shoot_over($1)`, [sb.id]), /not waiting for its shoot/)
 eq('confirming again changes nothing', (await as(user(c1), `select * from confirm_shoot($1)`, [sb.id])).rows[0].status, 'in_progress')
 eq('...and pays the deposit only once', (await su(`select count(*)::int n from payouts where booking_id=$1 and type='deposit_release'`, [sb.id])).rows[0].n, 1)
-eq('earned this month includes it', (await earn()).m, '686.25')
+eq('earned this month includes it', (await earn()).m, '675.45')
 eq('a client cannot read payouts', (await as(user(c1), `select * from payouts where booking_id=$1`, [sb.id])).rows.length, 0)
 
 const wd = (await asP2(`select * from request_withdrawal()`)).rows[0]
-eq('withdrawal pays out everything available', `${wd.r_total}/${wd.r_count}/${wd.r_completed}`, '686.25/1/true')
+eq('withdrawal pays out everything available', `${wd.r_total}/${wd.r_count}/${wd.r_completed}`, '675.45/1/true')
 eq('...with a SIM reference', wd.r_reference.startsWith('SIM-'), true)
 const po = (await su(`select status, bank_reference r from payouts where booking_id=$1`, [sb.id])).rows[0]
 eq('the payout is completed and carries the reference', `${po.status}/${po.r === wd.r_reference}`, 'completed/true')
-eq('balances move: available 0, paid out 686.25', `${(await earn()).a}/${(await earn()).o}`, '0.00/686.25'.replace('0.00', '0'))
+eq('balances move: available 0, paid out 675.45', `${(await earn()).a}/${(await earn()).o}`, '0.00/675.45'.replace('0.00', '0'))
 await raises('nothing left to withdraw', asP2(`select * from request_withdrawal()`), /nothing available to withdraw/)
 await raises('clients cannot withdraw', as(user(c1), `select * from request_withdrawal()`), /not a photographer account/)
 
@@ -650,10 +676,10 @@ eq('the final payment waits for the client', (await earn()).a, '0')
 await raises('only the client can approve', asP2(`select * from approve_gallery($1)`, [sb.id]), /not allowed/)
 const fin = (await as(user(c1), `select * from approve_gallery($1)`, [sb.id])).rows[0]
 eq('client approves: completed and fully released', `${fin.status}/${fin.payment_status}`, 'completed/fully_released')
-eq('the rest (70%) becomes available', `${(await earn()).a}/${(await earn()).e}`, '1601.25/0')
+eq('the rest (70%) becomes available', `${(await earn()).a}/${(await earn()).e}`, '1576.05/0')
 const wd2 = (await asP2(`select * from request_withdrawal()`)).rows[0]
-eq('second withdrawal', `${wd2.r_total}/${wd2.r_completed}`, '1601.25/true')
-eq('lifetime paid out equals the net amount', (await earn()).o, '2287.50')
+eq('second withdrawal', `${wd2.r_total}/${wd2.r_completed}`, '1576.05/true')
+eq('lifetime paid out equals the net amount', (await earn()).o, '2251.50')
 eq('a completed booking counts toward the tier', (await su(`select total_bookings n from photographer_profiles where id=$1`, [pid2])).rows[0].n, 1)
 
 console.log('\n# Test mode can never touch real money')
@@ -735,7 +761,7 @@ eq('the owner can mark them read', `${unreadBefore > 0}/${(await as(user(p2), `s
 const a2 = await pastShoot()
 await as(user(c1), `select * from confirm_shoot($1)`, [a2])
 eq('client confirmed without the photographer marking: counts as complete', (await getB(a2)).shoot_completed_at !== null, true)
-eq('deposit available at once (plus the earlier auto-confirmed one)', (await earn2()).a, '1372.50')
+eq('deposit available at once (plus the earlier auto-confirmed one)', (await earn2()).a, '1350.90')
 const w1 = (await asP2(`select * from request_withdrawal()`)).rows[0]
 eq('test mode withdrawal is "sent"', w1.r_completed, true)
 eq('...and the photographer is told it was sent', (await notes(p2, 'payout_sent')).length >= 1, true)
@@ -752,14 +778,14 @@ await as(user(adminId), `select * from admin_complete_payout((select id from pay
 const r1 = await pastShoot()
 await asP2(`select * from mark_shoot_complete($1)`, [r1])
 await as(user(c1), `select * from confirm_shoot($1)`, [r1])
-eq('the deposit is available before the problem', (await earn2()).a, '686.25')
+eq('the deposit is available before the problem', (await earn2()).a, '675.45')
 await raises('a stranger cannot report', as(user(c2), `select * from report_issue($1,'other','something is wrong here')`, [r1]), /not allowed/)
 await raises('the photographer cannot report the photos as bad', asP2(`select * from report_issue($1,'poor_quality','the photos are bad')`, [r1]), /only the client/)
 await raises('the client cannot report a client no-show', as(user(c1), `select * from report_issue($1,'client_no_show','I did not show up')`, [r1]), /only the photographer/)
 await raises('a report needs a real description', as(user(c1), `select * from report_issue($1,'not_delivered','short')`, [r1]), /at least 10/)
 const rep = (await as(user(c1), `select * from report_issue($1,'not_delivered','I have waited a week and heard nothing')`, [r1])).rows[0]
 eq('the report opens and the booking is disputed', `${rep.status}/${(await getB(r1)).status}`, 'open/disputed')
-eq('the unwithdrawn deposit goes on hold', `${(await earn2()).a}/${(await earn2()).h}`, '0.00/686.25'.replace('0.00', '0'))
+eq('the unwithdrawn deposit goes on hold', `${(await earn2()).a}/${(await earn2()).h}`, '0.00/675.45'.replace('0.00', '0'))
 await raises('cannot withdraw while on hold', asP2(`select * from request_withdrawal()`), /nothing available/)
 await raises('cannot report twice', as(user(c1), `select * from report_issue($1,'other','reporting again for fun')`, [r1]), /cannot report an issue at this stage/)
 eq('the photographer is told', (await notes(p2, 'issue_reported')).length >= 1, true)
@@ -768,7 +794,7 @@ eq('the admin is told', (await notes(adminId, 'dispute_opened')).length >= 1, tr
 await raises('a client cannot resolve', as(user(c1), `select * from admin_resolve_dispute($1,'dismiss','x')`, [rep.id]), /admins only/)
 await as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','Looks fine')`, [rep.id])
 eq('dismissed: the booking carries on', (await getB(r1)).status, 'in_progress')
-eq('...and the money is released again', `${(await earn2()).a}/${(await earn2()).h}`, '686.25/0')
+eq('...and the money is released again', `${(await earn2()).a}/${(await earn2()).h}`, '675.45/0')
 eq('both sides hear the outcome', `${(await notes(c1, 'issue_resolved')).length >= 1}/${(await notes(p2, 'issue_resolved')).length >= 1}`, 'true/true')
 await raises('cannot resolve twice', as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','x')`, [rep.id]), /already resolved/)
 await asP2(`select * from request_withdrawal()`)
@@ -784,7 +810,7 @@ await as(user(c1), `select * from confirm_shoot($1)`, [r3])
 const rep3 = (await as(user(c1), `select * from report_issue($1,'poor_quality','The photos are out of focus and cropped')`, [r3])).rows[0]
 await as(user(adminId), `select * from admin_resolve_dispute($1,'pay_photographer','Photos are fine')`, [rep3.id])
 eq('pay photographer: completed and fully released', `${(await getB(r3)).status}/${(await getB(r3)).payment_status}`, 'completed/fully_released')
-eq('...with everything available to withdraw', (await earn2()).a, '2287.50')
+eq('...with everything available to withdraw', (await earn2()).a, '2251.50')
 await asP2(`select * from request_withdrawal()`)
 
 console.log('\n# Delivering real photos (Worker functions)')
@@ -947,6 +973,175 @@ console.log('\n# Chats are deleted after 20 days')
   await as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','fine')`, [rep.id])
   await as(svc, `select purge_old_chats()`)
   eq('...and follow the 20-day rule once it is decided', (await su(`select count(*)::int n from chat_messages where booking_id=$1 and content='evidence'`, [cd])).rows[0].n, 0)
+}
+
+console.log('\n# The final money policy: fees, disputes, no-shows, strikes, date changes')
+{
+  const amt = (await su(`select * from calc_amounts(2400)`)).rows[0]
+  eq('R2,400: commission 7%, payment fee 2.9% + R1, net (matches the policy document)', `${amt.platform_fee}/${amt.transaction_fee}/${amt.net}`, '168.00/70.60/2161.40')
+  eq('...so a Tier 1 deposit is R648.42 and the final R1,512.98', `${(Math.round(2161.40 * 0.3 * 100) / 100).toFixed(2)}/${(2161.40 - 648.42).toFixed(2)}`, '648.42/1512.98')
+  await raises('a booking must choose a rate', as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow',null)`, [pk2[0], await dayPlus(300)]), /choose the Saver or the Flexible rate/)
+  await raises('...and only the two real ones', as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow','gold')`, [pk2[0], await dayPlus(300)]), /choose the Saver or the Flexible rate/)
+
+  // a paid booking whose shoot already started, with the first payment released (package price R1,200: net R1,080.20, deposit R324.06)
+  const released = async (rate = 'saver') => {
+    const d = await dayPlus(dn++)
+    await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d])
+    const x = (await as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow',$3)`, [pk2[0], d, rate])).rows[0]
+    await as(user(c1), `select * from simulate_payment($1)`, [x.id])
+    await as(user(c1), `select * from simulate_shoot_over($1)`, [x.id])
+    await as(user(c1), `select * from confirm_shoot($1)`, [x.id])
+    return x.id
+  }
+  const report = (id, type = 'not_delivered') => as(user(c1), `select * from report_issue($1,$2,'The photos never arrived, nothing at all')`, [id, type]).then((r) => r.rows[0])
+  const resolve = (dis, outcome, pct = null) => as(user(adminId), `select * from admin_resolve_dispute($1,$2,'decision made',$3)`, [dis.id, outcome, pct])
+  const sumPayouts = async (id) => (await su(`select coalesce(sum(amount),0)::text t from payouts where booking_id=$1 and status <> 'failed'`, [id])).rows[0].t
+
+  // dispute: the client wins -> the unpaid share comes back, the deposit stays with the photographer
+  const dc = await released()
+  eq('the deposit is released and waiting', await sumPayouts(dc), '324.06')
+  const dis1 = await report(dc)
+  eq('a decision date 5 working days away is set', (await su(`select (decision_due_by > now() + interval '4 days' and decision_due_by < now() + interval '8 days') ok from disputes where id=$1`, [dis1.id])).rows[0].ok, true)
+  await resolve(dis1, 'refund_client')
+  const bc = await getB(dc)
+  eq('client wins: refund = the unpaid 70% (R840.00)', `${bc.status}/${bc.payment_status}/${bc.refund_amount}`, 'cancelled/refunded/840.00')
+  eq('...the deposit is NOT refunded and is released to the photographer', `${await sumPayouts(dc)}/${(await su(`select frozen f from payouts where booking_id=$1`, [dc])).rows[0].f}`, '324.06/false')
+  eq('...the refund is due within 14 days', (await su(`select refund_due_by > now() + interval '13 days' ok from bookings where id=$1`, [dc])).rows[0].ok, true)
+
+  // dispute: the photographer wins -> the whole net is theirs
+  const dp = await released()
+  await resolve(await report(dp), 'pay_photographer')
+  eq('photographer wins: they receive the full net (R1,080.20)', `${(await getB(dp)).status}/${await sumPayouts(dp)}`, 'completed/1080.20')
+
+  // dispute: split decision
+  const ds = await released()
+  const dis3 = await report(ds)
+  await raises('a split needs a percentage', resolve(dis3, 'split'), /between 1 and 99/)
+  await raises('...a sensible one', resolve(dis3, 'split', 100), /between 1 and 99/)
+  await resolve(dis3, 'split', 50)
+  const bs = await getB(ds)
+  eq('split 50/50: the client gets half of the unpaid share (R420.00)', `${bs.status}/${bs.refund_amount}`, 'completed/420.00')
+  eq('...the photographer gets the deposit plus half of the final (R324.06 + R378.07)', await sumPayouts(ds), '702.13')
+
+  // photographer no-show: everything comes back, including the flexible fee, plus a strike
+  const strikesBefore = (await su(`select strike_count n from photographer_profiles where id=$1`, [pid2])).rows[0].n
+  const dn1 = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, dn1])
+  const nsB = (await as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow','flexible')`, [pk2[0], dn1])).rows[0]
+  await as(user(c1), `select * from simulate_payment($1)`, [nsB.id])
+  await as(user(c1), `select * from simulate_shoot_over($1)`, [nsB.id])
+  eq('a Flexible booking cost the client R1,200 + R150', nsB.total_amount, '1350.00')
+  await resolve(await report(nsB.id, 'photographer_no_show'), 'refund_client')
+  eq('no-show: 100% back including the flexible fee (R1,350.00)', (await getB(nsB.id)).refund_amount, '1350.00')
+  eq('...and the photographer gets a strike', (await su(`select strike_count n from photographer_profiles where id=$1`, [pid2])).rows[0].n, strikesBefore + 1)
+
+  // strikes: 1 warning, 2 = 30-day suspension, 3 = removed
+  await su(`update photographer_profiles set strike_count = 0 where id=$1`, [pid2])
+  const cancelPaid = async () => {
+    const d = await dayPlus(dn++)
+    await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d])
+    const x = (await as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], d])).rows[0]
+    await as(user(c1), `select * from simulate_payment($1)`, [x.id])
+    return x.id
+  }
+  const [k1, k2, k3] = [await cancelPaid(), await cancelPaid(), await cancelPaid()]
+  const pstat = async () => (await su(`select verification_status s, strike_count n, suspended_until u from photographer_profiles where id=$1`, [pid2])).rows[0]
+  await asP2(`select * from cancel_booking($1,'x')`, [k1])
+  eq('strike 1: a warning only', `${(await pstat()).s}/${(await pstat()).n}`, 'approved/1')
+  await asP2(`select * from cancel_booking($1,'x')`, [k2])
+  const st2 = await pstat()
+  eq('strike 2: suspended', `${st2.s}/${st2.n}`, 'suspended/2')
+  eq('...for 30 days', (await su(`select (suspended_until > now() + interval '29 days' and suspended_until < now() + interval '31 days') ok from photographer_profiles where id=$1`, [pid2])).rows[0].ok, true)
+  await raises('a suspended photographer cannot be booked', as(user(c1), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], await dayPlus(400)]), /not accepting bookings/)
+  await raises('a photographer cannot lift their own suspension', asP2(`update photographer_profiles set suspended_until = now() - interval '1 day' where id=$1`, [pid2]), /protected/)
+  eq('nothing is lifted early', (await as(svc, `select lift_suspensions() n`)).rows[0].n, 0)
+  await su(`update photographer_profiles set suspended_until = now() - interval '1 minute' where id=$1`, [pid2])
+  eq('after 30 days the suspension is lifted automatically', `${(await as(svc, `select lift_suspensions() n`)).rows[0].n}/${(await pstat()).s}`, '1/approved')
+  await asP2(`select * from cancel_booking($1,'x')`, [k3])
+  const st3 = await pstat()
+  eq('strike 3: removed for good (suspended with no end date)', `${st3.s}/${st3.n}/${(await su(`select suspended_until = 'infinity' f from photographer_profiles where id=$1`, [pid2])).rows[0].f}`, 'suspended/3/true')
+  eq('...and never lifted', (await as(svc, `select lift_suspensions() n`)).rows[0].n, 0)
+  await su(`update photographer_profiles set verification_status='approved', strike_count=0, suspended_until=null where id=$1`, [pid2])
+
+  // refunds are tracked and sent by an admin
+  await raises('a client cannot mark a refund sent', as(user(c1), `select * from admin_mark_refund_sent($1,'X')`, [dc]), /admins only/)
+  await as(user(adminId), `select * from admin_mark_refund_sent($1,'EFT-REF-9')`, [dc])
+  eq('an admin marks it sent with a reference', (await getB(dc)).refund_reference, 'EFT-REF-9')
+  eq('...and the client is told', (await su(`select count(*)::int n from notifications where user_id=$1 and type='refund_sent' and booking_id=$2`, [c1, dc])).rows[0].n, 1)
+  await raises('...only once', as(user(adminId), `select * from admin_mark_refund_sent($1,'again')`, [dc]), /no refund is waiting/)
+
+  // working days
+  eq('1 working day after Friday 13 Nov is Monday 16 Nov', (await su(`select to_char(add_working_days('2026-11-13 10:00+02'::timestamptz, 1) at time zone 'Africa/Johannesburg', 'YYYY-MM-DD') d`)).rows[0].d, '2026-11-16')
+
+  // minimum withdrawal
+  await asP2(`select * from request_withdrawal()`)
+  await su(`insert into payouts (photographer_id, booking_id, amount, type) values ($1,$2,50,'final_release')`, [pid2, dc])
+  await raises('withdrawals start at R100', asP2(`select * from request_withdrawal()`), /minimum withdrawal is R100.00/)
+  await su(`update payouts set amount = 100 where photographer_id=$1 and amount = 50`, [pid2])
+  eq('...R100 is allowed', (await asP2(`select * from request_withdrawal()`)).rows[0].r_total, '100.00')
+}
+
+console.log('\n# Date changes (Flexible rate, photographer approves)')
+{
+  const future = async (rate, daysAhead, time = '10:00', pkg = pk2[0]) => {
+    const d = await dayPlus(daysAhead)
+    await asP2(`insert into availability (photographer_id,day) values ($1,$2) on conflict do nothing`, [pid2, d])
+    const x = (await as(user(c1), `select * from create_booking($1,$2,$3,'','ozow',$4)`, [pkg, d, time, rate])).rows[0]
+    await as(user(c1), `select * from simulate_payment($1)`, [x.id])
+    return x.id
+  }
+  const open2 = async (n) => { const d = await dayPlus(n); await asP2(`insert into availability (photographer_id,day) values ($1,$2) on conflict do nothing`, [pid2, d]); return d }
+  const ask = (who, id, date, time = '11:00') => as(user(who), `select * from request_reschedule($1,$2,$3)`, [id, date, time])
+  const decide = (who, id, yes, note = '') => as(user(who), `select * from decide_reschedule($1,$2,$3)`, [id, yes, note])
+
+  const sv = await future('saver', 30)
+  await raises('the Saver rate has no date changes', ask(c1, sv, await open2(60)), /only available with the Flexible rate/)
+
+  const fx = await future('flexible', 31)
+  const newDay = await open2(61)
+  await raises('a stranger cannot ask', ask(c2, fx, newDay), /not allowed/)
+  await raises('the photographer cannot ask for the client', ask(p2, fx, newDay), /not allowed/)
+  await raises('a past date is refused', ask(c1, fx, await dayPlus(-2)), /in the future/)
+  await raises('a day the photographer has not opened is refused', ask(c1, fx, await dayPlus(299)), /not available on this date/)
+  await raises('less than 48h from now is refused', ask(c1, fx, await open2(1)), /at least 48 hours/)
+  const req = (await ask(c1, fx, newDay)).rows[0]
+  eq('the request is waiting', req.status, 'pending')
+  eq('the photographer is told', (await su(`select count(*)::int n from notifications where user_id=$1 and type='reschedule_request' and booking_id=$2`, [p2, fx])).rows[0].n, 1)
+  await raises('only one request at a time', ask(c1, fx, newDay, '12:00'), /already have a date change waiting/)
+  await raises('the client cannot approve their own request', decide(c1, req.id, true), /not allowed/)
+  await raises('a stranger cannot approve', decide(p1, req.id, true), /not allowed/)
+  await decide(p2, req.id, true)
+  const moved = await getB(fx)
+  eq('approved: the booking moves to the new date and time', (await su(`select shoot_date::text||'/'||shoot_time::text v from bookings where id=$1`, [fx])).rows[0].v, `${newDay}/11:00:00`)
+  eq('...and the start and end move with it', (await su(`select (shoot_starts_at = ((shoot_date + shoot_time) at time zone 'Africa/Johannesburg') and shoot_ends_at = shoot_starts_at + interval '2 hours') ok from bookings where id=$1`, [fx])).rows[0].ok, true)
+  eq('...it counts as the one free change', moved.date_changes, 1)
+  eq('...the client is told', (await su(`select count(*)::int n from notifications where user_id=$1 and type='reschedule_approved' and booking_id=$2`, [c1, fx])).rows[0].n, 1)
+  await raises('only one free date change', ask(c1, fx, await open2(62)), /already used your free date change/)
+  await raises('an answered request cannot be answered again', decide(p2, req.id, false), /already been answered/)
+  eq('the refund cut-off follows the new date: cancelling still refunds', (await as(user(c1), `select * from cancel_booking($1,'x')`, [fx])).rows[0].refund_amount, '1200.00')
+
+  // decline, expiry, conflicts
+  const f2 = await future('flexible', 33)
+  const r2 = (await ask(c1, f2, await open2(63))).rows[0]
+  await decide(p2, r2.id, false, 'I am away that week')
+  eq('declined: the booking stays', `${(await su(`select status from reschedule_requests where id=$1`, [r2.id])).rows[0].status}/${(await getB(f2)).date_changes}`, 'declined/0')
+  eq('...and the client hears why', (await su(`select count(*)::int n from notifications where user_id=$1 and type='reschedule_declined' and body like '%away that week%'`, [c1])).rows[0].n, 1)
+  const r3 = (await ask(c1, f2, await open2(64))).rows[0]
+  await su(`update reschedule_requests set created_at = now() - interval '49 hours' where id=$1`, [r3.id])
+  await raises('an unanswered request expires after 48 hours', decide(p2, r3.id, true), /has expired/)
+  const r4 = (await ask(c1, f2, await open2(65))).rows[0]
+  await su(`update reschedule_requests set created_at = now() - interval '49 hours' where id=$1`, [r4.id])
+  eq('the scheduled job expires old requests and tells the client', `${(await as(svc, `select expire_reschedules() n`)).rows[0].n}/${(await su(`select status from reschedule_requests where id=$1`, [r4.id])).rows[0].status}`, '1/expired')
+  // someone else takes the slot while the request waits
+  const f3 = await future('flexible', 35)
+  const busyDay = await open2(66)
+  const r5 = (await ask(c1, f3, busyDay, '10:00')).rows[0]
+  const other = await future('saver', 66, '10:00')
+  await raises('approving fails if the slot was taken meanwhile', decide(p2, r5.id, true), /already booked/)
+  await as(user(c1), `select * from cancel_booking($1,'x')`, [f3])
+  eq('cancelling a booking cancels its waiting request', (await su(`select status from reschedule_requests where id=$1`, [r5.id])).rows[0].status, 'cancelled')
+  await raises('date changes only apply to paid, upcoming bookings', ask(c1, f3, await open2(67)), /only a paid booking/)
+  await raises('normal users cannot call the strike or release helpers', as(user(p2), `select apply_strike($1,'x')`, [pid2]), /permission denied/)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

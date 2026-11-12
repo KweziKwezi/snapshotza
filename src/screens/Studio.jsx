@@ -69,6 +69,9 @@ function StudioGate() {
     setChecked(true)
   }
   const name = (auth.profile?.full_name || '').split(' ')[0]
+  const suspendedUntil = auth.photographer.suspended_until
+  const removed = suspendedUntil === 'infinity' || auth.photographer.strike_count >= 3
+  const until = suspendedUntil && !removed ? new Date(suspendedUntil).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' }) : 'further notice'
 
   if (status === 'pending_verification') {
     return (
@@ -93,8 +96,12 @@ function StudioGate() {
     return (
       <Screen>
         <div className="px-5 pt-6">
-          <H1>Your studio<br />is paused.</H1>
-          <p className="mt-2 text-[14px] text-neutral-600">Your account is not taking bookings right now. Please contact SnapshotZA support.</p>
+          <H1>{removed ? <>Your account<br />was removed.</> : <>Your studio<br />is paused.</>}</H1>
+          <p className="mt-2 text-[14px] text-neutral-600">
+            {removed
+              ? 'After a third strike your account was removed from SnapshotZA. If you think this is a mistake, contact support with valid proof (for example a tow invoice or a doctor’s note) to appeal.'
+              : <>Your account is suspended after a second strike, until <b>{until}</b>. You will be able to take bookings again automatically. You can appeal with valid proof by contacting support.</>}
+          </p>
           <SignOutLink />
         </div>
       </Screen>
@@ -184,6 +191,12 @@ function Dashboard({ live }) {
             {maxed ? 'Half of every booking lands within 24 hours of the shoot. The rest follows delivery.' : `${left} more completed ${left === 1 ? 'booking' : 'bookings'} lifts your early payout from ${TIER_DEPOSIT_PCT[tier]}% to ${TIER_DEPOSIT_PCT[tier + 1]}%. The rest is paid after you deliver your photos.`}
           </p>
         </div>
+
+        {live && auth.photographer.strike_count > 0 && (
+          <Notice tone="cream" className="mt-4" icon={<Icon.Shield size={18} />} title={`You have ${auth.photographer.strike_count} strike${auth.photographer.strike_count > 1 ? 's' : ''}`}>
+            Strikes come from cancelling a paid booking or not showing up. A second strike suspends your account for 30 days and a third removes it. Always cancel early and talk to your client in Messages.
+          </Notice>
+        )}
 
         {live && (
           <section className="mt-6" aria-label="Manage your studio">

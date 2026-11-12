@@ -5,12 +5,14 @@ import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import { GalleryPanel } from './Delivery.jsx'
+import { RatePicker } from './Policy.jsx'
+import { ClientReschedule } from './Reschedule.jsx'
 import { Messages, MessageButton } from './Chat.jsx'
 import {
   Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, NotificationBell, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
 import {
-  CATEGORIES, DAYS_SHORT, GALLERY_RETENTION_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, SPECIALTIES, TIMES, isAvailable, money, packagesFor,
+  CATEGORIES, DAYS_SHORT, FLEX_FEE, FREE_CANCEL_HOURS, GALLERY_RETENTION_DAYS, REFUND_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, SPECIALTIES, TIMES, isAvailable, money, packagesFor,
 } from '../data.js'
 
 /* ---------- helpers ---------- */
@@ -660,7 +662,7 @@ export function ChooseDate() {
 export function Review() {
   const { go, back, state, set, auth } = useApp()
   const { p, pkg } = usePhotographer()
-  const [agree, setAgree] = useState(true)
+  const [agree, setAgree] = useState(false)
   const needsAccount = supabaseConfigured && auth.status !== 'in'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -670,7 +672,7 @@ export function Review() {
     setBusy(true)
     setError('')
     try {
-      const booking = await market.createBooking({ packageId: pkg.id, date: state.date, time: state.time, gateway: state.payment })
+      const booking = await market.createBooking({ packageId: pkg.id, date: state.date, time: state.time, gateway: state.payment, rate: state.rate })
       set({ reservation: booking })
       go('gateway')
     } catch (e) {
@@ -679,14 +681,15 @@ export function Review() {
       setBusy(false)
     }
   }
-  const total = pkg.price
+  const rate = state.rate
+  const total = pkg.price + (rate === 'flexible' ? FLEX_FEE : 0)
   const method = PAY_METHODS.find((m) => m.id === state.payment)
   return (
     <Screen
       footer={
         <>
           {error && <p role="alert" className="mb-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
-          <Button disabled={!agree || busy || !state.date} onClick={pay}>
+          <Button disabled={!rate || !agree || busy || !state.date} onClick={pay}>
             {busy ? 'Reserving…' : needsAccount ? 'Sign in to continue' : supabaseConfigured ? (state.sim ? 'Reserve & continue' : 'Reserve this date') : `Pay ${money(total)} securely`}
           </Button>
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-neutral-500"><Icon.Lock size={12} /> Encrypted & secure</div>
@@ -711,9 +714,12 @@ export function Review() {
           <div className="mt-0.5 text-[12px] text-neutral-500">{p.city} · Location agreed in chat</div>
         </div>
 
-        <div className="space-y-2.5 border-b border-line py-4 text-[14px]">
+        <RatePicker price={pkg.price} value={rate} onChange={(r) => { set({ rate: r }); setAgree(false) }} />
+
+        <div className="mt-4 space-y-2.5 border-b border-line py-4 text-[14px]">
           <div className="flex justify-between"><span className="text-neutral-600">{pkg.name} package</span><span className="font-semibold">{money(pkg.price)}</span></div>
-          <div className="flex justify-between"><span className="text-neutral-600">Booking protection</span><span className="font-semibold text-ok">Included</span></div>
+          {rate === 'flexible' && <div className="flex justify-between"><span className="text-neutral-600">Flexible rate (cancel or move your date)</span><span className="font-semibold">{money(FLEX_FEE)}</span></div>}
+          <div className="flex justify-between"><span className="text-neutral-600">Payment protection</span><span className="font-semibold text-ok">Included</span></div>
         </div>
         <div className="flex items-center justify-between py-4">
           <span className="text-[16px] font-semibold">Total to pay</span>
@@ -728,7 +734,7 @@ export function Review() {
           </Notice>
         )}
         <Notice icon={<Icon.Lock size={18} />} title="Your money stays yours. Until delivery.">
-          {money(total)} is held securely in escrow. {p.name.split(' ')[0]} receives the first part 24 hours after your shoot, and the rest once your photos are delivered. No extra fees for you.
+          {money(total)} is held securely in escrow. {p.name.split(' ')[0]} receives the first part once your shoot is confirmed, and the rest once your photos are delivered. No hidden fees.
           <button className="mt-1.5 block font-semibold text-link" onClick={() => go('protection')}>View payment protection</button>
         </Notice>
 
@@ -744,8 +750,10 @@ export function Review() {
         </div>
 
         <div className="mt-4 pb-4">
-          <Checkbox checked={agree} onChange={setAgree}>I agree to the shoot contract and cancellation policy.</Checkbox>
-          <p className="ml-8 mt-1 text-[11.5px] text-neutral-500">Your contract is created automatically after payment.</p>
+          <Checkbox checked={agree} onChange={setAgree}>
+            {rate ? `I have read and accept the ${rate === 'flexible' ? 'Flexible' : 'Saver'} rate terms above and the cancellation policy.` : 'Choose a rate first, then accept its terms.'}
+          </Checkbox>
+          <button className="ml-8 mt-1 text-[12px] font-semibold text-link" onClick={() => go('policy')}>Read the full cancellation policy</button>
         </div>
       </div>
     </Screen>
@@ -1076,7 +1084,7 @@ const STATUS = {
 const HOLD_MS = 30 * 60 * 1000
 const statusOf = (b) => (b.status === 'pending' && Date.now() - new Date(b.created_at).getTime() > HOLD_MS ? ['Expired', 'bg-surface text-neutral-500'] : STATUS[b.status] || [b.status, 'bg-surface'])
 
-function ClientBookingCard({ b, sim, onChanged }) {
+function ClientBookingCard({ b, sim, request, onChanged }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -1114,6 +1122,7 @@ function ClientBookingCard({ b, sim, onChanged }) {
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{label}</span>
           {b.simulated && <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>}
+          <span className="rounded bg-white px-1.5 py-0.5 text-[9.5px] font-semibold text-neutral-600">{b.rate_type === 'saver' ? 'Saver' : 'Flexible'}</span>
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between text-[12px] text-neutral-500">
@@ -1174,9 +1183,11 @@ function ClientBookingCard({ b, sim, onChanged }) {
       )}
       {b.status === 'confirmed' && confirming && (
         <div className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">
-          {hoursToShoot >= 48
-            ? <>Cancelling now refunds <b>{money(total - fee)}</b>. Our {money(fee)} fee isn’t refunded.</>
-            : <>The shoot is less than 48 hours away, so cancelling means <b>no refund</b>: your payment goes to the photographer.</>}
+          {b.rate_type === 'flexible' && hoursToShoot >= FREE_CANCEL_HOURS
+            ? <>Cancelling now refunds <b>{money(Number(b.package_price))}</b> within {REFUND_DAYS} days. The {money(Number(b.flex_fee))} flexible-rate fee is not refunded.</>
+            : b.rate_type === 'saver'
+              ? <>You chose the Saver rate, so cancelling means <b>no refund</b>. Your photographer is paid for holding your date. You cannot change the date on this rate.</>
+              : <>The shoot is less than {FREE_CANCEL_HOURS} hours away, so cancelling means <b>no refund</b>: your photographer is paid for holding your date.</>}
           <div className="mt-3 flex gap-3">
             <button disabled={Boolean(busy)} onClick={() => run('cancel', () => market.cancelBooking(b.id, 'Cancelled by client'))} className="rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-white disabled:opacity-50">{busy === 'cancel' ? 'Cancelling…' : 'Yes, cancel it'}</button>
             <button onClick={() => setConfirming(false)} className="rounded-lg bg-surface px-3 py-2 text-[12.5px] font-semibold">Keep booking</button>
@@ -1184,9 +1195,19 @@ function ClientBookingCard({ b, sim, onChanged }) {
         </div>
       )}
 
+      {b.status === 'confirmed' && <ClientReschedule b={b} request={request} onChanged={onChanged} />}
       <MessageButton b={b} />
       <ReportLink b={b} role="client" onChanged={onChanged} />
-      {b.status === 'cancelled' && b.payment_status === 'refunded' && <p className="mt-3 text-[12px] text-neutral-500">Refunded{b.simulated ? ' (test)' : ''}.</p>}
+      {b.status === 'cancelled' && Number(b.refund_amount) > 0 && (
+        <p className="mt-3 text-[12px] text-neutral-600" data-testid="refund-note">
+          {b.refund_sent_at
+            ? <>Refund of <b>{money(Number(b.refund_amount))}</b> sent{b.refund_reference ? ` (reference ${b.refund_reference})` : ''}{b.simulated ? ' (test)' : ''}.</>
+            : <>Refund of <b>{money(Number(b.refund_amount))}</b> will be paid by <b>{new Date(b.refund_due_by).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</b>{b.simulated ? ' (test)' : ''}.</>}
+        </p>
+      )}
+      {b.status === 'cancelled' && Number(b.refund_amount) === 0 && b.payment_status !== 'pending' && b.forfeited_at && (
+        <p className="mt-3 text-[12px] text-neutral-500">Cancelled with no refund{b.rate_type === 'saver' ? ' (Saver rate)' : ''}.</p>
+      )}
       {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
     </div>
   )
@@ -1198,10 +1219,13 @@ function BookingsLive() {
   const [error, setError] = useState('')
   const userId = auth.user?.id
 
+  const [requests, setRequests] = useState({})
   const load = useCallback(async () => {
     setError('')
     try {
-      setItems(await market.myBookings(userId))
+      const list = await market.myBookings(userId)
+      setItems(list)
+      setRequests(await market.pendingReschedules(list.filter((x) => x.status === 'confirmed').map((x) => x.id)))
     } catch (e) {
       setError(explain(e))
       setItems([])
@@ -1226,7 +1250,7 @@ function BookingsLive() {
           <Notice className="mt-5" icon={<Icon.Calendar size={18} />} title="No bookings yet">Find a photographer and reserve a date.</Notice>
         )}
         <div className="mt-5 space-y-3 pb-5">
-          {items?.map((b) => <ClientBookingCard key={b.id} b={b} sim={state.sim} onChanged={load} />)}
+          {items?.map((b) => <ClientBookingCard key={b.id} b={b} sim={state.sim} request={requests[b.id]} onChanged={load} />)}
         </div>
       </div>
     </Screen>

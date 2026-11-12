@@ -4,6 +4,7 @@ import { supabaseConfigured } from '../lib/supabase.js'
 import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
+import { GalleryPanel } from './Delivery.jsx'
 import {
   Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, NotificationBell, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
@@ -1158,6 +1159,7 @@ function ClientBookingCard({ b, sim, onChanged }) {
       {b.status === 'in_progress' && !b.shoot_confirmed_at && <p className="mt-2 text-[12px] text-neutral-600">The shoot was confirmed automatically. Your photographer is preparing your photos.</p>}
       {b.status === 'disputed' && <p className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">Our team is reviewing the problem you reported. Payments are on hold. We’ll tell you what we decide.</p>}
 
+      {(b.status === 'gallery_uploaded' || b.status === 'completed') && b.gallery_uploaded_at && <GalleryPanel b={b} />}
       {b.status === 'gallery_uploaded' && (
         <div className="mt-3 space-y-2">
           <p className="text-[12px] text-neutral-600">Your photos are ready. Approve them to release the rest of the payment, or it releases automatically after 48 hours.</p>

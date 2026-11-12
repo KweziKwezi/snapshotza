@@ -33,6 +33,8 @@ export const APP_SELECTS = [
   ['payouts', 'id, booking_id, amount, type, status, frozen, bank_reference, created_at, completed_at, simulated'],
   ['payouts', 'id, booking_id, photographer_id, amount, type, status, frozen, created_at'],
   ['payout_accounts', 'photographer_id, bank_name, account_holder, account_number, account_type, branch_code'],
+  ['photos', 'id, file_name, size_bytes, upload_order'],
+  ['packages', 'id, name, num_photos'],
   ['notifications', 'id, type, title, body, booking_id, created_at, read_at'],
   ['disputes', 'id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by'],
   ['disputes', '*'],
@@ -54,5 +56,6 @@ export const APP_RPCS = [
   ['report_issue', { p_booking: NIL, p_type: 'other', p_description: 'check' }],
   ['admin_resolve_dispute', { p_dispute: NIL, p_outcome: 'dismiss', p_note: 'check' }],
   ['simulate_delivery', { p_booking: NIL }],
+  ['deliver_gallery', { p_booking: NIL }],
   ['admin_complete_payout', { p_payout: NIL, p_bank_reference: 'check' }],
 ]

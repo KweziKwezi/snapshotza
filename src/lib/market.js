@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js'
-import { explain } from './studio.js'
+import { compressImage, explain } from './studio.js'
 
 const must = ({ error }, fallback) => {
   if (error) throw new Error(explain(error, fallback))
@@ -127,7 +127,7 @@ export async function approveGallery(bookingId) {
 /** The signed-in client's bookings, with the photographer and package names filled in. */
 export async function myBookings(userId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, gallery_expires_at, gallery_purged_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
     .eq('client_id', userId).order('created_at', { ascending: false }).limit(50)
   must(res, 'Could not load your bookings.')
   const rows = res.data || []
@@ -176,7 +176,7 @@ export async function studioBookings(photographerId) {
   const kids = [...new Set(rows.map((r) => r.package_id))]
   const [clients, packs] = await Promise.all([
     supabase.from('profiles').select('id, full_name').in('id', cids),       // visible once a booking is paid
-    supabase.from('packages').select('id, name').in('id', kids),
+    supabase.from('packages').select('id, name, num_photos').in('id', kids),
   ])
   const cm = Object.fromEntries((clients.data || []).map((x) => [x.id, x]))
   const km = Object.fromEntries((packs.data || []).map((x) => [x.id, x]))
@@ -184,6 +184,7 @@ export async function studioBookings(photographerId) {
     ...r,
     clientName: cm[r.client_id]?.full_name || 'Client',
     packageName: km[r.package_id]?.name || 'Package',
+    numPhotos: km[r.package_id]?.num_photos || 0,
     net: Number(r.total_amount) - Number(r.platform_fee) - Number(r.transaction_fee),
   }))
 }
@@ -378,4 +379,71 @@ export async function completeTransfers(payoutIds, reference) {
     }
   }
   return skipped
+}
+
+/* --------------------------------------------- delivering & downloading photos */
+export const MAX_PHOTO_MB = 50
+export const DELIVERY_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+async function authHeader() {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('Your session expired. Please sign in again.')
+  return { authorization: `Bearer ${token}` }
+}
+async function api(path, init = {}) {
+  const res = await fetch(path, { ...init, headers: { ...(await authHeader()), ...(init.headers || {}) } })
+  if (!res.ok) {
+    let msg = ''
+    try { msg = (await res.json()).error } catch { msg = '' }
+    if (res.status === 503) msg = 'Photo delivery is being set up and is not available yet. Please try again soon.'
+    throw new Error(explain(new Error(msg || 'The upload did not work. Please try again.')))
+  }
+  return res
+}
+
+/** Why a file can't be delivered (or '' if it can). */
+export function deliveryProblem(file) {
+  if (!DELIVERY_TYPES.includes(file.type)) return `${file.name}: only JPG, PNG or WebP photos can be delivered.`
+  if (file.size > MAX_PHOTO_MB * 1024 * 1024) return `${file.name}: each photo must be under ${MAX_PHOTO_MB} MB.`
+  return ''
+}
+
+/** Uploads one edited photo at full quality, with a smaller preview made right here in the browser. */
+export async function uploadDeliveryPhoto(bookingId, file) {
+  const problem = deliveryProblem(file)
+  if (problem) throw new Error(problem)
+  const preview = await compressImage(file, { maxEdge: 1600, quality: 0.8 })
+  const form = new FormData()
+  form.set('file', file, file.name)
+  form.set('preview', preview, 'preview.jpg')
+  form.set('name', file.name)
+  return (await api(`/api/deliveries/${bookingId}`, { method: 'POST', body: form })).json()
+}
+export async function removeDeliveryPhoto(photoId) {
+  await api(`/api/photos/${photoId}`, { method: 'DELETE' })
+}
+export async function listDeliveryPhotos(bookingId) {
+  const res = await supabase.from('photos').select('id, file_name, size_bytes, upload_order')
+    .eq('booking_id', bookingId).eq('is_proof', false).order('upload_order')
+  must(res, 'Could not load the photos.')
+  return res.data || []
+}
+export async function deliverGallery(bookingId) {
+  must(await supabase.rpc('deliver_gallery', { p_booking: bookingId }), 'Could not deliver the photos.')
+}
+/** The photo as a temporary local address, for <img>. Call URL.revokeObjectURL when done. */
+export async function photoObjectUrl(photoId, variant = 'preview') {
+  return URL.createObjectURL(await (await api(`/api/photos/${photoId}/${variant}`)).blob())
+}
+/** Saves the full-size photo to the device. */
+export async function downloadPhoto(photoId, name = 'photo.jpg') {
+  const url = await photoObjectUrl(photoId, 'full')
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30000)
 }

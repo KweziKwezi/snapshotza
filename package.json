@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:db": "node supabase/tests/db.test.mjs",
+    "test:worker": "node scripts/worker.test.mjs",
     "check:api": "node scripts/check-api.mjs"
   },
   "dependencies": {

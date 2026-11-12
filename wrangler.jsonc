@@ -1,18 +1,28 @@
 {
-  // Cloudflare Workers (static assets) deployment for the SnapshotZA PWA.
+  // Cloudflare Workers deployment for the SnapshotZA PWA.
   // The name MUST match the Worker name shown in the Cloudflare dashboard.
   "name": "snapshotza",
   "compatibility_date": "2026-11-09",
 
-  // The built Vite app. Unknown paths fall back to index.html (single-page app).
+  // The Worker handles /api/* (delivering and downloading photos) and hands everything else to the built app.
+  "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
 
-  // Runtime variables. The app is static, so there are none.
-  // NOTE: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are *build* variables (Vite bakes them into the bundle
-  // while building). Set them in Cloudflare -> your Worker -> Settings -> Build -> Variables and secrets,
-  // NOT under runtime "Variables and Secrets".
-  "vars": {}
+  // Public values only (the same ones the app already ships in its bundle).
+  // The secret SUPABASE_SERVICE_KEY is NOT here: add it in Cloudflare -> your Worker -> Settings -> Variables and secrets.
+  "vars": {
+    "SUPABASE_URL": "https://xghlqfjwrzxpbvshqazj.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_FX-eE84i9hLLgpVcJGL-OA_fO2114y5"
+  },
+
+  // Once a day: delete galleries whose 15-day download period has ended.
+  "triggers": { "crons": ["17 2 * * *"] }
+
+  // Photo storage. Uncomment AFTER creating the bucket in Cloudflare -> R2 (a missing bucket makes the deploy fail):
+  // "r2_buckets": [{ "binding": "DELIVERIES", "bucket_name": "snapshotza-deliveries" }]
 }

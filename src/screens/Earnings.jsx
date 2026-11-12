@@ -5,6 +5,7 @@ import { explain } from '../lib/studio.js'
 import { DAYS_SHORT, MONTHS, money } from '../data.js'
 import { AppNav } from './Client.jsx'
 import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
+import { DeliveryPanel } from './Delivery.jsx'
 import { Button, H1, Icon, Notice, Screen, TopBar } from '../ui.jsx'
 
 const TestTag = () => <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>
@@ -212,12 +213,11 @@ function StudioBookingCard({ b, sim, onChanged }) {
       {b.status === 'in_progress' && (
         <>
           <p className="mt-3 text-[12px] text-neutral-600">{b.shoot_confirmed_at ? 'Your client confirmed the shoot.' : 'The shoot was confirmed automatically.'} Your first payment has been released. Deliver the photos to get the rest.</p>
-          {testable ? (
+          <DeliveryPanel b={b} onChanged={onChanged} />
+          {testable && (
             <div className="mt-3">
-              <Button variant="dark" disabled={Boolean(busy)} onClick={() => run('deliver', () => market.simulateDelivery(b.id))}>{busy === 'deliver' ? 'Working…' : 'Test: deliver the photos'}</Button>
+              <Button variant="dark" disabled={Boolean(busy)} onClick={() => run('deliver', () => market.simulateDelivery(b.id))}>{busy === 'deliver' ? 'Working…' : 'Test: deliver without photos'}</Button>
             </div>
-          ) : (
-            <p className="mt-2 text-[12px] text-neutral-500">Photo upload is coming soon.</p>
           )}
         </>
       )}

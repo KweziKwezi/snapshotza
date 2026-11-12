@@ -130,3 +130,12 @@ Run `supabase/migrations/20261113000009_shoot_confirmation_notifications_reports
 - **TEST MODE helpers** (simulated bookings only): "jump to after the shoot" and "skip the 24-hour / 48-hour wait" let you try the real steps without waiting.
 - Tests: `npm run test:db` (358 checks). Browser tests live outside the repo.
 - **Payouts to send (admin)** - Account > Payouts to send lists real (non-test) withdrawals waiting for a bank transfer, grouped by photographer with their bank details. After paying from your bank, enter the bank reference and tap "Mark as sent"; the photographer is notified. Payments on hold because of a problem report are shown but cannot be marked sent.
+
+## Delivering the real photos (migration 10 + Worker)
+See `DELIVERY_SETUP.md` for the one-time setup (run migration 10, create the R2 bucket, link it, add the secret).
+
+- `src/worker.js` (a Cloudflare Worker) is the only thing that stores or serves delivery photos. The browser signs in as usual; the Worker asks the database who may do what (`worker_register_photo`, `worker_remove_photo`, `worker_photo_key` - callable only with the service key), then moves bytes to/from R2.
+- Photographers can no longer insert delivery photos straight into the table, so "delivered" means "really uploaded".
+- Clients see previews once delivered; full-size downloads unlock when the booking is completed, for 15 days. Approving the photos also confirms the shoot.
+- A daily cron deletes expired galleries (files, then the database rows).
+- Tests: `npm run test:db` (388 checks) and `npm run test:worker` (37 checks, fake R2 + fake Supabase).

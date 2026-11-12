@@ -128,7 +128,7 @@ const bookAndPay = async (client, pkg, offset, time = '14:00') => {
   return b.id
 }
 const getB = async (id) => (await su(`select * from bookings where id=$1`, [id])).rows[0]
-const shiftEnded = (id, hoursAgo) => su(`update bookings set shoot_ends_at = now() - make_interval(hours => $2), shoot_starts_at = now() - make_interval(hours => $2 + 2) where id=$1`, [id, hoursAgo])
+const shiftEnded = (id, hoursAgo) => su(`update bookings set shoot_ends_at = now() - make_interval(hours => $2), shoot_starts_at = now() - make_interval(hours => $2 + 2), shoot_completed_at = now() - make_interval(hours => $2) where id=$1`, [id, hoursAgo])
 const payouts = async (id) => (await su(`select type, amount::text, status from payouts where booking_id=$1 order by created_at, type`, [id])).rows
 
 await raises('cannot book a day the photographer has not opened', as(user(c1), `select * from create_booking($1,$2,'14:00','x','ozow')`, [pk.Gold, await dayPlus(11)]), /not available on this date/)
@@ -614,14 +614,24 @@ eq('the chat opens with a system message', (await as(user(c1), `select * from ch
 await raises('cannot pay twice', as(user(c1), `select * from simulate_payment($1)`, [sb.id]), /not awaiting payment/)
 const earn = async () => (await asP2(`select available::text a, processing::text p, paid_out::text o, in_escrow::text e, earned_this_month::text m from my_earnings()`)).rows[0]
 eq('paid money is in escrow for the photographer (2500 - 125 - 87.50)', `${(await earn()).e}/${(await earn()).a}`, '2287.50/0')
-await raises('a stranger cannot fast-forward', as(user(c2), `select * from simulate_shoot_done($1)`, [sb.id]), /not allowed/)
-await raises('the client cannot fast-forward', as(user(c1), `select * from simulate_shoot_done($1)`, [sb.id]), /not allowed/)
-await raises('delivery needs the shoot to be done first', asP2(`select * from simulate_delivery($1)`, [sb.id]), /mark the shoot as done first/)
-const done = (await asP2(`select * from simulate_shoot_done($1)`, [sb.id])).rows[0]
-eq('shoot done: in progress, deposit released', done.status, 'in_progress')
+await raises('a stranger cannot fast-forward', as(user(c2), `select * from simulate_shoot_over($1)`, [sb.id]), /not allowed/)
+await raises('delivery needs the shoot to have happened first', asP2(`select * from simulate_delivery($1)`, [sb.id]), /jump to after the shoot first/)
+await raises('the photographer cannot mark it complete before it starts', asP2(`select * from mark_shoot_complete($1)`, [sb.id]), /once it has started/)
+await raises('the client cannot confirm before it starts', as(user(c1), `select * from confirm_shoot($1)`, [sb.id]), /once it has started/)
+const over = (await as(user(c1), `select * from simulate_shoot_over($1)`, [sb.id])).rows[0]
+eq('jump to after the shoot: still confirmed, in the past', `${over.status}/${new Date(over.shoot_starts_at) < new Date()}`, 'confirmed/true')
+eq('...nothing is paid yet', `${(await earn()).a}/${(await earn()).e}`, '0/2287.50'.replace('0/','0.00/').replace('0.00/','0/'))
+const marked = (await asP2(`select * from mark_shoot_complete($1)`, [sb.id])).rows[0]
+eq('photographer marks complete: waits for the client', `${marked.status}/${marked.shoot_completed_at !== null}/${marked.deposit_released_at}`, 'confirmed/true/null')
+await raises('a stranger cannot confirm', as(user(c2), `select * from confirm_shoot($1)`, [sb.id]), /not allowed/)
+await raises('the photographer cannot confirm for the client', asP2(`select * from confirm_shoot($1)`, [sb.id]), /not allowed/)
+const done = (await as(user(c1), `select * from confirm_shoot($1)`, [sb.id])).rows[0]
+eq('client confirms: in progress, deposit released', done.status, 'in_progress')
 eq('Tier 1 deposit is 30% of net, available to withdraw', `${(await earn()).a}/${(await earn()).e}`, '686.25/1601.25')
 eq('the payout is flagged as a test payout', (await su(`select simulated s from payouts where booking_id=$1`, [sb.id])).rows[0].s, true)
-await raises('cannot fast-forward twice', asP2(`select * from simulate_shoot_done($1)`, [sb.id]), /only be fast-forwarded once/)
+await raises('fast-forwarding after it is in progress is refused', asP2(`select * from simulate_shoot_over($1)`, [sb.id]), /not waiting for its shoot/)
+eq('confirming again changes nothing', (await as(user(c1), `select * from confirm_shoot($1)`, [sb.id])).rows[0].status, 'in_progress')
+eq('...and pays the deposit only once', (await su(`select count(*)::int n from payouts where booking_id=$1 and type='deposit_release'`, [sb.id])).rows[0].n, 1)
 eq('earned this month includes it', (await earn()).m, '686.25')
 eq('a client cannot read payouts', (await as(user(c1), `select * from payouts where booking_id=$1`, [sb.id])).rows.length, 0)
 
@@ -652,7 +662,7 @@ await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid
 const rb = (await book(user(c2), pk2[1], dR, '10:00')).rows[0]
 await as(svc, `select * from confirm_payment($1,'ozow','REF-REAL-77',$2)`, [rb.id, rb.total_amount])
 eq('a gateway-paid booking is not flagged as a test', (await getB(rb.id)).simulated, false)
-await raises('test mode cannot fast-forward a really-paid booking', asP2(`select * from simulate_shoot_done($1)`, [rb.id]), /only test bookings/)
+await raises('test mode cannot fast-forward a really-paid booking', asP2(`select * from simulate_shoot_over($1)`, [rb.id]), /only test bookings/)
 await raises('...or deliver it without photos', asP2(`select * from simulate_delivery($1)`, [rb.id]), /only test bookings/)
 await shiftEnded(rb.id, 25)
 await as(svc, `select process_due_payouts()`)
@@ -670,7 +680,7 @@ await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid
 const ob = (await book(user(c1), pk2[1], dO, '10:00')).rows[0]
 await raises('with test mode off, simulated payment is refused', as(user(c1), `select * from simulate_payment($1)`, [ob.id]), /switched off/)
 await as(svc, `select * from confirm_payment($1,'ozow','REF-REAL-78',$2)`, [ob.id, ob.total_amount])
-await raises('...and so is fast-forwarding', asP2(`select * from simulate_shoot_done($1)`, [ob.id]), /switched off/)
+await raises('...and so is fast-forwarding', asP2(`select * from simulate_shoot_over($1)`, [ob.id]), /switched off/)
 await raises('...and test delivery', asP2(`select * from simulate_delivery($1)`, [ob.id]), /switched off/)
 await su(`update platform_settings set simulate_payments=true`)
 
@@ -679,6 +689,103 @@ await su(`update photographer_profiles set bank_verified=false where id=$1`, [pi
 await raises('no withdrawal while the bank account is unverified', asP2(`select * from request_withdrawal()`), /add and verify your bank details/)
 await su(`update photographer_profiles set bank_verified=true where id=$1`, [pid2])
 eq('a suspended or unapproved photographer cannot withdraw either', await as(user(p1), `select * from request_withdrawal()`).then(() => 'allowed').catch((e) => (/verify your bank/.test(e.message) ? 'blocked' : e.message)), 'blocked')
+
+console.log('\n# Shoot confirmation: 24-hour auto-confirm, notifications, problem reports')
+let dn = 70
+const pastShoot = async (client = c1, pkgId = pk2[1]) => {
+  const d = await dayPlus(dn++)
+  await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d])
+  const x = (await book(user(client), pkgId, d, '10:00')).rows[0]
+  await as(user(client), `select * from simulate_payment($1)`, [x.id])
+  await as(user(client), `select * from simulate_shoot_over($1)`, [x.id])
+  return x.id
+}
+const notes = async (uid, type) => (await su(`select * from notifications where user_id=$1 ${type ? 'and type=$2' : ''} order by created_at`, type ? [uid, type] : [uid])).rows
+const earn2 = async () => (await asP2(`select available::text a, on_hold::text h from my_earnings()`)).rows[0]
+
+// 1. auto-confirm 24h after the photographer marks complete
+const a1 = await pastShoot()
+eq('a new booking notifies the photographer', (await notes(p2, 'new_booking')).length >= 1, true)
+await as(svc, `select process_due_payouts()`)
+eq('nobody acting: nothing is paid just because time passed', (await getB(a1)).deposit_released_at, null)
+await asP2(`select * from mark_shoot_complete($1)`, [a1])
+eq('the client is asked to confirm', (await notes(c1, 'confirm_shoot')).length >= 1, true)
+await su(`update bookings set shoot_completed_at = now() - interval '23 hours' where id=$1`, [a1])
+await as(svc, `select process_due_payouts()`)
+eq('23 hours after marking: still waiting', (await getB(a1)).deposit_released_at, null)
+await su(`update bookings set shoot_completed_at = now() - interval '25 hours' where id=$1`, [a1])
+await as(svc, `select process_due_payouts()`)
+eq('25 hours after marking: confirmed automatically, deposit released', `${(await getB(a1)).status}/${(await getB(a1)).deposit_released_at !== null}`, 'in_progress/true')
+eq('...but the client never pressed confirm', (await getB(a1)).shoot_confirmed_at, null)
+eq('the photographer is told the deposit is queued', (await notes(p2, 'payout_queued')).length >= 1, true)
+await as(svc, `select process_due_payouts()`)
+eq('running the engine again does not pay twice', (await su(`select count(*)::int n from payouts where booking_id=$1`, [a1])).rows[0].n, 1)
+
+// 2. notifications: privacy and lifecycle
+eq('a client cannot read the photographer notifications', (await as(user(c1), `select * from notifications where user_id=$1`, [p2])).rows.length, 0)
+await raises('nobody can write notifications directly', as(user(c1), `insert into notifications (user_id,type,title) values ($1,'x','x')`, [c1]), /permission denied/)
+await raises('nobody can delete notifications', as(user(c1), `delete from notifications where user_id=$1`, [c1]), /permission denied/)
+await raises('nobody can edit the text of a notification', as(user(c1), `update notifications set title='hacked' where user_id=$1`, [c1]), /permission denied/)
+await raises('visitors cannot read notifications', as(anon, `select * from notifications`), /permission denied/)
+const unreadBefore = (await as(user(p2), `select count(*)::int n from notifications where read_at is null`)).rows[0].n
+await as(user(p2), `update notifications set read_at = now() where read_at is null`)
+eq('the owner can mark them read', `${unreadBefore > 0}/${(await as(user(p2), `select count(*)::int n from notifications where read_at is null`)).rows[0].n}`, 'true/0')
+
+// 3. client confirms early, then the photographer withdraws: "sent"
+const a2 = await pastShoot()
+await as(user(c1), `select * from confirm_shoot($1)`, [a2])
+eq('client confirmed without the photographer marking: counts as complete', (await getB(a2)).shoot_completed_at !== null, true)
+eq('deposit available at once (plus the earlier auto-confirmed one)', (await earn2()).a, '1372.50')
+const w1 = (await asP2(`select * from request_withdrawal()`)).rows[0]
+eq('test mode withdrawal is "sent"', w1.r_completed, true)
+eq('...and the photographer is told it was sent', (await notes(p2, 'payout_sent')).length >= 1, true)
+
+// 4. withdrawal of a real payout says "being sent"
+const a3 = await pastShoot()
+await su(`update bookings set simulated=false where id=$1`, [a3])
+await as(user(c1), `select * from confirm_shoot($1)`, [a3])
+await asP2(`select * from request_withdrawal()`)
+eq('a real payout tells the photographer it is being sent', (await notes(p2, 'payout_processing')).length >= 1, true)
+await as(user(adminId), `select * from admin_complete_payout((select id from payouts where booking_id=$1),'EFT-99')`, [a3])
+
+// 5. problem reports
+const r1 = await pastShoot()
+await asP2(`select * from mark_shoot_complete($1)`, [r1])
+await as(user(c1), `select * from confirm_shoot($1)`, [r1])
+eq('the deposit is available before the problem', (await earn2()).a, '686.25')
+await raises('a stranger cannot report', as(user(c2), `select * from report_issue($1,'other','something is wrong here')`, [r1]), /not allowed/)
+await raises('the photographer cannot report the photos as bad', asP2(`select * from report_issue($1,'poor_quality','the photos are bad')`, [r1]), /only the client/)
+await raises('the client cannot report a client no-show', as(user(c1), `select * from report_issue($1,'client_no_show','I did not show up')`, [r1]), /only the photographer/)
+await raises('a report needs a real description', as(user(c1), `select * from report_issue($1,'not_delivered','short')`, [r1]), /at least 10/)
+const rep = (await as(user(c1), `select * from report_issue($1,'not_delivered','I have waited a week and heard nothing')`, [r1])).rows[0]
+eq('the report opens and the booking is disputed', `${rep.status}/${(await getB(r1)).status}`, 'open/disputed')
+eq('the unwithdrawn deposit goes on hold', `${(await earn2()).a}/${(await earn2()).h}`, '0.00/686.25'.replace('0.00', '0'))
+await raises('cannot withdraw while on hold', asP2(`select * from request_withdrawal()`), /nothing available/)
+await raises('cannot report twice', as(user(c1), `select * from report_issue($1,'other','reporting again for fun')`, [r1]), /cannot report an issue at this stage/)
+eq('the photographer is told', (await notes(p2, 'issue_reported')).length >= 1, true)
+eq('the reporter gets a receipt', (await notes(c1, 'issue_received')).length >= 1, true)
+eq('the admin is told', (await notes(adminId, 'dispute_opened')).length >= 1, true)
+await raises('a client cannot resolve', as(user(c1), `select * from admin_resolve_dispute($1,'dismiss','x')`, [rep.id]), /admins only/)
+await as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','Looks fine')`, [rep.id])
+eq('dismissed: the booking carries on', (await getB(r1)).status, 'in_progress')
+eq('...and the money is released again', `${(await earn2()).a}/${(await earn2()).h}`, '686.25/0')
+eq('both sides hear the outcome', `${(await notes(c1, 'issue_resolved')).length >= 1}/${(await notes(p2, 'issue_resolved')).length >= 1}`, 'true/true')
+await raises('cannot resolve twice', as(user(adminId), `select * from admin_resolve_dispute($1,'dismiss','x')`, [rep.id]), /already resolved/)
+await asP2(`select * from request_withdrawal()`)
+
+const r2 = await pastShoot()
+const rep2 = (await as(user(c1), `select * from report_issue($1,'not_delivered','No photos have arrived at all')`, [r2])).rows[0]
+await as(user(adminId), `select * from admin_resolve_dispute($1,'refund_client','Refund approved')`, [rep2.id])
+eq('refund: booking cancelled and refunded', `${(await getB(r2)).status}/${(await getB(r2)).payment_status}`, 'cancelled/refunded')
+
+const r3 = await pastShoot()
+await asP2(`select * from mark_shoot_complete($1)`, [r3])
+await as(user(c1), `select * from confirm_shoot($1)`, [r3])
+const rep3 = (await as(user(c1), `select * from report_issue($1,'poor_quality','The photos are out of focus and cropped')`, [r3])).rows[0]
+await as(user(adminId), `select * from admin_resolve_dispute($1,'pay_photographer','Photos are fine')`, [rep3.id])
+eq('pay photographer: completed and fully released', `${(await getB(r3)).status}/${(await getB(r3)).payment_status}`, 'completed/fully_released')
+eq('...with everything available to withdraw', (await earn2()).a, '2287.50')
+await asP2(`select * from request_withdrawal()`)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

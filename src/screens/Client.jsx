@@ -267,7 +267,7 @@ export function Home() {
       <div className="px-5 pt-2">
         <div className="flex items-start justify-between">
           <div>
-            <div className="font-display text-[11px] font-bold tracking-wider">SNAPSHOTZA</div>
+            <div className="font-display text-[11px] font-bold tracking-wider lg:hidden">SNAPSHOTZA</div>
             <div className="mt-1.5 flex items-center gap-1 text-[12px] text-neutral-600">
               <Icon.Pin size={14} /> South Africa
             </div>

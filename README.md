@@ -170,3 +170,13 @@ Run `supabase/migrations/20261118000014_final_money_policy.sql` after 0013. The 
 - Disputes: client wins = unpaid share back (deposit stays); photographer wins = final; or a split by percentage. Decision due in 5 working days.
 - Refunds are due within 14 days; admins send them from **Refunds to send** and the client is notified.
 - Tests: `npm run test:db` (498 checks).
+
+## Contact details (migration 15)
+Run `supabase/migrations/20261119000015_contact_details.sql` after 0014.
+- Sign-up asks for a South African mobile number (stored as +27…). Everyone can edit their name and number under Account > Contact details (photographers: Manage your studio > Contact details).
+- Email changes go through Supabase's confirmation link; the profile follows once confirmed. Profiles cannot change their email directly, and a phone number cannot be removed once given.
+- A client needs a phone number to book. Tests: `npm run test:db` (517 checks).
+
+## Landing page and desktop layout
+- Signed-out visitors see a landing page (hero, photographers, how it works, payment protection and rates, for photographers, FAQ). "I'm a photographer" opens sign-up as a photographer; style chips open the list filtered.
+- Desktop (1024px+): a top bar replaces the bottom tabs; browsing screens use the full width (4 photographers across); lists use a medium column; forms stay a centred column. Phones are unchanged.

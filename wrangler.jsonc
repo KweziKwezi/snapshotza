@@ -21,8 +21,8 @@
   },
 
   // Once a day: delete galleries whose 15-day download period has ended.
-  "triggers": { "crons": ["17 2 * * *"] }
+  "triggers": { "crons": ["17 2 * * *"] },
 
-  // Photo storage. Uncomment AFTER creating the bucket in Cloudflare -> R2 (a missing bucket makes the deploy fail):
-  // "r2_buckets": [{ "binding": "DELIVERIES", "bucket_name": "snapshotza-deliveries" }]
+  // Private photo storage (Cloudflare -> R2). The bucket must exist or the deploy fails.
+  "r2_buckets": [{ "binding": "DELIVERIES", "bucket_name": "snapshotza-deliveries" }]
 }

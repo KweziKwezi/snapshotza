@@ -5,8 +5,8 @@ import { useApp } from '../store.jsx'
 import { supabaseConfigured } from '../lib/supabase.js'
 import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
-import { CATEGORIES, money } from '../data.js'
-import { Avatar, Icon, Lightbox, NotificationBell, Photo, initials } from '../ui.jsx'
+import { CATEGORIES, DAYS_SHORT, FLEX_FEE, MONTHS, money } from '../data.js'
+import { Avatar, Icon, Lightbox, NotificationBell, Photo, WebContext, initials } from '../ui.jsx'
 import { SearchBox, usePhotographer } from './Client.jsx'
 import { Thread } from './Chat.jsx'
 import { ago } from './Notifications.jsx'
@@ -402,5 +402,208 @@ export function WebInbox() {
         </section>
       </div>
     </div>
+  )
+}
+
+/* =====================================================================================================================
+   Website layouts for every other screen. The screens themselves are shared with the app (same logic, same rules);
+   inside these layouts they render as web pages (see WebContext in ui.jsx).
+   ===================================================================================================================== */
+
+const Scroll = ({ children, testid }) => <div className="h-full overflow-y-auto" data-testid={testid}>{children}</div>
+const AsWeb = ({ children }) => <WebContext.Provider value>{children}</WebContext.Provider>
+
+/* ---------- Account / studio / admin: dashboard with a side menu ---------- */
+const MENUS = {
+  client: [
+    ['Your account', [['account', 'Overview', Icon.User], ['bookings', 'My bookings', Icon.Calendar], ['chat', 'Messages', Icon.Message], ['notifications', 'Notifications', Icon.Bell]]],
+    ['Settings', [['editContact', 'Contact details', Icon.IdCard]]],
+  ],
+  photographer: [
+    ['Studio', [['studio', 'Dashboard', Icon.Home], ['bookings', 'Bookings', Icon.Calendar], ['earnings', 'Earnings', Icon.Bank], ['chat', 'Messages', Icon.Message], ['notifications', 'Notifications', Icon.Bell]]],
+    ['Your profile', [['editProfile', 'Profile & photo', Icon.User], ['editPortfolio', 'Portfolio', Icon.Camera], ['myPackages', 'Packages', Icon.Card], ['availability', 'Hours & days', Icon.Calendar]]],
+    ['Settings', [['editBank', 'Bank details', Icon.Bank], ['editContact', 'Contact details', Icon.IdCard]]],
+  ],
+  admin: [
+    ['Admin', [['account', 'Overview', Icon.Shield], ['adminList', 'Photographer reviews', Icon.Eye], ['adminReports', 'Problem reports', Icon.Message], ['adminPayouts', 'Payouts to send', Icon.Bank], ['adminRefunds', 'Refunds to send', Icon.Card], ['adminBanks', 'Bank checks', Icon.Check]]],
+    ['You', [['notifications', 'Notifications', Icon.Bell], ['editContact', 'Contact details', Icon.IdCard]]],
+  ],
+}
+const MENU_ALIAS = { adminReview: 'adminList', adminReport: 'adminReports' }
+
+export function WebDashboard({ Current, screen }) {
+  const { auth, jump, signOut, state } = useApp()
+  const role = auth.profile?.role === 'admin' ? 'admin' : auth.profile?.role === 'photographer' ? 'photographer' : 'client'
+  const active = MENU_ALIAS[screen] || screen
+  const studioNotReady = role === 'photographer' && auth.photographer && auth.photographer.verification_status !== 'approved'
+  return (
+    <Scroll testid="web-dashboard">
+      <div className="mx-auto flex max-w-7xl gap-10 px-8 py-8">
+        <aside className="w-60 shrink-0" aria-label="Account menu">
+          <div className="sticky top-8">
+            <div className="mb-6 flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-surface text-[13px] font-semibold">{initials(auth.profile?.full_name || '?')}</span>
+              <div className="min-w-0">
+                <div className="truncate text-[14.5px] font-semibold">{auth.profile?.full_name || 'Your account'}</div>
+                <div className="text-[12px] capitalize text-neutral-500">{role}</div>
+              </div>
+            </div>
+            {MENUS[role].map(([group, items]) => (
+              <nav key={group} className="mb-6" aria-label={group}>
+                <div className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-wider text-neutral-400">{group}</div>
+                {items.map(([to, label, I]) => {
+                  const disabled = studioNotReady && !['studio', 'notifications', 'editContact', 'chat'].includes(to)
+                  const badge = to === 'chat' ? state.chatUnread : to === 'notifications' ? state.unread : 0
+                  return (
+                    <button key={to} disabled={disabled} onClick={() => jump(to)} aria-current={active === to ? 'page' : undefined}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] disabled:opacity-40 ${active === to ? 'bg-ink font-semibold text-white' : 'text-neutral-700 hover:bg-surface'}`}>
+                      <I size={18} /> <span className="flex-1">{label}</span>
+                      {badge > 0 && <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{badge > 9 ? '9+' : badge}</span>}
+                    </button>
+                  )
+                })}
+              </nav>
+            ))}
+            <button onClick={signOut} className="px-3 text-[13.5px] font-semibold text-neutral-500 hover:text-ink">Sign out</button>
+          </div>
+        </aside>
+        <main className="min-w-0 max-w-4xl flex-1">
+          <AsWeb><Current /></AsWeb>
+        </main>
+      </div>
+    </Scroll>
+  )
+}
+
+/* ---------- Booking steps: checkout with a summary on the side ---------- */
+const FLOW_STEPS = [['date', 'Date & time'], ['review', 'Rate & details'], ['gateway', 'Payment'], ['confirmed', 'Confirmed']]
+const FLOW_STEP_OF = { date: 0, review: 1, payment: 1, protection: 1, gateway: 2, confirmed: 3 }
+
+function BookingSummary() {
+  const { state } = useApp()
+  const { p, pkg } = usePhotographer()
+  const b = state.reservation
+  const d = state.date
+  const when = d ? `${DAYS_SHORT[new Date(d.y, d.m, d.d).getDay()]} ${d.d} ${MONTHS[d.m].slice(0, 3)} ${d.y}${state.time ? ` · ${state.time}` : ''}` : 'Choose a date'
+  const rate = b?.rate_type || state.rate
+  const price = b ? Number(b.package_price ?? b.total_amount) : pkg.price
+  const total = b ? Number(b.total_amount) : pkg.price + (rate === 'flexible' ? FLEX_FEE : 0)
+  return (
+    <div className="sticky top-8 rounded-3xl border border-line p-6 shadow-[0_6px_30px_rgba(0,0,0,0.06)]" data-testid="booking-summary">
+      <h2 className="font-display text-[18px] font-bold">Your booking</h2>
+      {p?.name && (
+        <div className="mt-4 flex items-center gap-3">
+          <Avatar person={p} size={48} />
+          <div className="min-w-0">
+            <div className="truncate text-[15px] font-semibold">{p.name}</div>
+            <div className="text-[12.5px] text-neutral-500">{p.city?.split(',')[0]}</div>
+          </div>
+        </div>
+      )}
+      <dl className="mt-5 space-y-3 border-t border-line pt-4 text-[14px]">
+        <div className="flex justify-between gap-4"><dt className="text-neutral-500">Package</dt><dd className="text-right font-semibold">{pkg.name || '—'}{pkg.hours ? <span className="block text-[12px] font-normal text-neutral-500">{pkg.hours} hours · {pkg.photos} photos</span> : null}</dd></div>
+        <div className="flex justify-between gap-4"><dt className="text-neutral-500">When</dt><dd className="text-right font-semibold">{when}</dd></div>
+        <div className="flex justify-between gap-4"><dt className="text-neutral-500">Rate</dt><dd className="text-right font-semibold">{rate ? (rate === 'flexible' ? 'Flexible' : 'Saver') : 'Choose at the next step'}</dd></div>
+        <div className="flex justify-between gap-4"><dt className="text-neutral-500">Package price</dt><dd className="font-semibold">{money(price)}</dd></div>
+        {rate === 'flexible' && <div className="flex justify-between gap-4"><dt className="text-neutral-500">Flexible rate</dt><dd className="font-semibold">{money(FLEX_FEE)}</dd></div>}
+      </dl>
+      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+        <span className="text-[15px] font-semibold">Total</span>
+        <span className="font-display text-[24px] font-extrabold">{money(total)}</span>
+      </div>
+      <p className="mt-4 flex gap-2 text-[12.5px] text-neutral-600"><Icon.Lock size={14} className="mt-0.5 shrink-0 text-link" /> Held safely: the photographer is paid when your shoot is confirmed and your photos are delivered.</p>
+    </div>
+  )
+}
+
+export function WebFlow({ Current, screen }) {
+  const step = FLOW_STEP_OF[screen] ?? 0
+  return (
+    <Scroll testid="web-flow">
+      <div className="mx-auto max-w-6xl px-8 py-8">
+        <ol className="mb-8 flex items-center gap-3" aria-label="Booking steps">
+          {FLOW_STEPS.map(([id, label], i) => (
+            <li key={id} className="flex items-center gap-3" aria-current={i === step ? 'step' : undefined}>
+              <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-bold ${i < step ? 'bg-ink text-white' : i === step ? 'bg-brand text-ink' : 'bg-surface text-neutral-400'}`}>{i < step ? <Icon.Check size={13} /> : i + 1}</span>
+              <span className={`text-[14px] font-semibold ${i === step ? 'text-ink' : 'text-neutral-400'}`}>{label}</span>
+              {i < FLOW_STEPS.length - 1 && <span className="h-px w-10 bg-line" />}
+            </li>
+          ))}
+        </ol>
+        <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-10">
+          <div className="min-w-0"><AsWeb><Current /></AsWeb></div>
+          <aside><BookingSummary /></aside>
+        </div>
+      </div>
+      <SiteFooter />
+    </Scroll>
+  )
+}
+
+/* ---------- Sign in / create account: split page ---------- */
+export function WebAuth({ Current }) {
+  const { state, jump, auth } = useApp()
+  const photographer = state.signupRole === 'photographer'
+  const points = photographer
+    ? ['No monthly fees: 7% plus the payment fee, only when you are booked', 'Clients pay upfront, so no chasing deposits', 'Up to 50% of your earnings released when the shoot is confirmed']
+    : ['ID-verified photographers across South Africa', 'Your payment is held until your photos are delivered', '100% back if your photographer does not show up']
+  return (
+    <div className="grid h-full grid-cols-2" data-testid="web-auth">
+      <section className="flex flex-col justify-between bg-ink p-14 text-white">
+        <div>
+          <div className="mb-14 text-white [&_span]:text-ink"><Logo onClick={() => jump(auth.status === 'in' ? 'home' : 'splash')} /></div>
+          <p className="text-[13px] font-bold uppercase tracking-wider text-brand">{photographer ? 'For photographers' : 'SnapshotZA'}</p>
+          <h1 className="mt-4 max-w-md font-display text-[44px] font-extrabold leading-[1.05] tracking-tight">{photographer ? 'Get booked. Get paid. Safely.' : 'Great moments. The right photographer.'}</h1>
+          <ul className="mt-10 space-y-4 text-[15.5px] text-neutral-300">
+            {points.map((t) => <li key={t} className="flex gap-3"><Icon.Check size={18} className="mt-0.5 shrink-0 text-brand" /> {t}</li>)}
+          </ul>
+        </div>
+        <p className="text-[13px] text-neutral-500">Made for South Africa. Built on trust.</p>
+      </section>
+      <section className="h-full overflow-y-auto">
+        <div className="mx-auto max-w-md px-6 py-14"><AsWeb><Current /></AsWeb></div>
+      </section>
+    </div>
+  )
+}
+
+/* ---------- Photographer onboarding: steps on the side ---------- */
+const ONB = [['onbProfile', 'Profile', 'Your name, photo and style'], ['onbPortfolio', 'Portfolio', 'At least 5 of your best photos'], ['onbPackages', 'Packages', 'Three ways to book you'], ['payouts', 'Payouts', 'Where we send your money'], ['verify', 'Verification', 'Your ID, checked by our team']]
+export function WebOnboarding({ Current, screen }) {
+  const { jump } = useApp()
+  const step = Math.max(0, ONB.findIndex(([id]) => id === screen))
+  return (
+    <Scroll testid="web-onboarding">
+      <div className="mx-auto flex max-w-6xl gap-12 px-8 py-10">
+        <aside className="w-72 shrink-0">
+          <div className="sticky top-10">
+            <p className="text-[12px] font-bold uppercase tracking-wider text-neutral-400">Create your studio</p>
+            <ol className="mt-5 space-y-1" aria-label="Setup steps">
+              {ONB.map(([id, label, hint], i) => (
+                <li key={id} aria-current={i === step ? 'step' : undefined} className={`flex gap-3 rounded-2xl p-3 ${i === step ? 'bg-cream' : ''}`}>
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${i < step ? 'bg-ink text-white' : i === step ? 'bg-brand' : 'bg-surface text-neutral-400'}`}>{i < step ? <Icon.Check size={14} /> : i + 1}</span>
+                  <span>
+                    <span className={`block text-[14.5px] font-semibold ${i > step ? 'text-neutral-400' : ''}`}>{label}</span>
+                    <span className="block text-[12.5px] text-neutral-500">{hint}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <button onClick={() => jump('studio')} className="mt-6 px-3 text-[13.5px] font-semibold text-neutral-500 hover:text-ink">Save & exit</button>
+          </div>
+        </aside>
+        <main className="min-w-0 max-w-2xl flex-1"><AsWeb><Current /></AsWeb></main>
+      </div>
+    </Scroll>
+  )
+}
+
+/* ---------- Plain document pages (policy) and anything else ---------- */
+export function WebDoc({ Current }) {
+  return (
+    <Scroll testid="web-doc">
+      <div className="mx-auto max-w-3xl px-8 py-10"><AsWeb><Current /></AsWeb></div>
+      <SiteFooter />
+    </Scroll>
   )
 }

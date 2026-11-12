@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+
+/** True when a screen is shown inside the WEBSITE layout (computers). Screens then render as web pages. */
+export const WebContext = createContext(false)
+export const useWeb = () => useContext(WebContext)
 
 /* ---------- Icons ---------- */
 const I = ({ children, size = 20, className = '', fill = 'none', sw = 1.8 }) => (
@@ -63,6 +67,20 @@ export const Avatar = ({ person, size = 44 }) => (
 
 /* ---------- Layout ---------- */
 export function Screen({ children, footer, nav, dark = false }) {
+  const web = useWeb()
+  if (web && !dark) {
+    // Website: the page scrolls as a whole; the main action sits at the end of the content instead of pinned to the bottom.
+    return (
+      <div className="pb-12" data-web-page>
+        {children}
+        {footer && (
+          <div className="mx-5 mt-8 border-t border-line pt-6">
+            <div className="ml-auto max-w-sm">{footer}</div>
+          </div>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={`flex h-full min-h-0 flex-col ${dark ? 'bg-ink text-white' : 'bg-white'}`}>
       <div className="scroll-hide min-h-0 flex-1 overflow-y-auto">{children}</div>
@@ -73,6 +91,21 @@ export function Screen({ children, footer, nav, dark = false }) {
 }
 
 export function TopBar({ title, onBack, right, avatar }) {
+  const web = useWeb()
+  if (web) {
+    return (
+      <div className="flex items-center gap-3 px-5 pb-2 pt-1">
+        {onBack && (
+          <button onClick={onBack} aria-label="Back" className="flex items-center gap-1 rounded-lg py-1 pr-2 text-[13.5px] font-semibold text-neutral-500 hover:text-ink">
+            <Icon.Back size={17} /> Back
+          </button>
+        )}
+        {avatar}
+        <div className="flex-1 truncate text-[13px] font-semibold uppercase tracking-wider text-neutral-400">{title}</div>
+        {right}
+      </div>
+    )
+  }
   return (
     <div className="flex h-12 items-center gap-3 px-5">
       {onBack && (
@@ -88,6 +121,7 @@ export function TopBar({ title, onBack, right, avatar }) {
 }
 
 export function Stepper({ steps, current, left, right }) {
+  if (useWeb()) return null   // the website shows the steps in its own sidebar or summary
   return (
     <div className="px-5">
       <div className="mb-1.5 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-neutral-500">

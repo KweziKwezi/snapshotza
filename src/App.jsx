@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { AppProvider, useApp } from './store.jsx'
 import { Icon } from './ui.jsx'
-import { SiteHeader, WebBrowse, WebInbox, WebProfile, useIsDesktop } from './screens/Web.jsx'
+import { SiteHeader, WebAuth, WebBrowse, WebDashboard, WebDoc, WebFlow, WebInbox, WebOnboarding, WebProfile, useIsDesktop } from './screens/Web.jsx'
 import { Landing } from './screens/Landing.jsx'
 import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
@@ -77,27 +77,33 @@ const MENU = [
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.
 const SHOW_PREVIEW = import.meta.env.DEV || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('preview'))
 
-// WEBSITE version (computers): these screens have their own website pages; every other screen is shown as a centred
-// page under the site header (lists a little wider than forms). Phones get the app version below.
+// WEBSITE version (computers). Every screen has a website layout:
+//   own pages:   home (browse), profile, messages
+//   checkout:    the booking steps, with a booking summary on the side
+//   dashboard:   account, bookings, studio, earnings, settings and admin, with a side menu
+//   sign in:     a split page;  onboarding: steps on the side;  documents: an article page
 const WEB_PAGES = { home: WebBrowse, profile: WebProfile, chat: WebInbox, thread: WebInbox }
-const MEDIUM = new Set(['bookings', 'notifications', 'studio', 'earnings', 'availability', 'policy', 'account',
-  'adminList', 'adminReview', 'adminReports', 'adminReport', 'adminPayouts', 'adminRefunds', 'adminBanks', 'myPackages', 'editPortfolio'])
+const LAYOUT = {}
+for (const s of ['date', 'review', 'payment', 'protection', 'gateway', 'confirmed']) LAYOUT[s] = WebFlow
+for (const s of ['onbProfile', 'onbPortfolio', 'onbPackages', 'payouts', 'verify']) LAYOUT[s] = WebOnboarding
+for (const s of ['account', 'editContact', 'notifications', 'bookings', 'studio', 'earnings', 'availability', 'editProfile', 'editPortfolio',
+  'myPackages', 'editBank', 'adminList', 'adminReview', 'adminReports', 'adminReport', 'adminPayouts', 'adminRefunds', 'adminBanks']) LAYOUT[s] = WebDashboard
+LAYOUT.auth = WebAuth
 
 function WebShell({ Current, screen, banner, booting }) {
+  const { auth } = useApp()
   if (screen === 'splash' || booting) {
     return <div className="flex h-dvh flex-col bg-white">{banner}<div className="min-h-0 flex-1"><Current /></div></div>
   }
   const Page = WEB_PAGES[screen]
+  // Account pages need someone signed in; signed-out visitors see them as a simple page (they show their own sign-in prompt).
+  const Layout = LAYOUT[screen] === WebDashboard && auth.status !== 'in' ? WebDoc : LAYOUT[screen] || WebDoc
   return (
     <div className="flex h-dvh flex-col bg-white" data-testid="website">
       {banner}
-      <SiteHeader />
+      {screen !== 'auth' && <SiteHeader />}
       <main className="min-h-0 flex-1" key={screen}>
-        {Page ? <Page /> : (
-          <div className={`mx-auto h-full w-full px-8 pt-4 ${MEDIUM.has(screen) ? 'max-w-3xl' : 'max-w-xl'}`}>
-            <Current />
-          </div>
-        )}
+        {Page ? <Page /> : <Layout Current={Current} screen={screen} />}
       </main>
     </div>
   )

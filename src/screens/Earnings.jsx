@@ -278,7 +278,7 @@ export function StudioBookings() {
         {approved && items?.length === 0 && !error && (
           <Notice className="mt-5" icon={<Icon.Calendar size={18} />} title="No bookings yet">When a client books and pays, it shows up here. Make sure you’ve opened some days in your calendar.</Notice>
         )}
-        <div className="mt-5 space-y-3 pb-5">
+        <div className="mt-5 space-y-3 pb-5 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
           {items?.map((b) => <StudioBookingCard key={b.id} b={b} sim={state.sim} request={requests[b.id]} onChanged={load} />)}
         </div>
       </div>

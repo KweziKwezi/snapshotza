@@ -31,6 +31,8 @@ export const APP_SELECTS = [
   ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id'],
   ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id'],
   ['payouts', 'id, booking_id, amount, type, status, frozen, bank_reference, created_at, completed_at, simulated'],
+  ['payouts', 'id, booking_id, photographer_id, amount, type, status, frozen, created_at'],
+  ['payout_accounts', 'photographer_id, bank_name, account_holder, account_number, account_type, branch_code'],
   ['notifications', 'id, type, title, body, booking_id, created_at, read_at'],
   ['disputes', 'id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by'],
   ['disputes', '*'],
@@ -52,4 +54,5 @@ export const APP_RPCS = [
   ['report_issue', { p_booking: NIL, p_type: 'other', p_description: 'check' }],
   ['admin_resolve_dispute', { p_dispute: NIL, p_outcome: 'dismiss', p_note: 'check' }],
   ['simulate_delivery', { p_booking: NIL }],
+  ['admin_complete_payout', { p_payout: NIL, p_bank_reference: 'check' }],
 ]

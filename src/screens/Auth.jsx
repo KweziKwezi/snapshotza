@@ -128,6 +128,7 @@ export function Account() {
         <div className="mt-5 space-y-3">
           {p?.role === 'admin' && <Button onClick={() => go('adminList')}>Review photographers</Button>}
           {p?.role === 'admin' && <Button onClick={() => go('adminReports')}>{openReports > 0 ? `Problem reports (${openReports} open)` : 'Problem reports'}</Button>}
+          {p?.role === 'admin' && <Button onClick={() => go('adminPayouts')}>Payouts to send</Button>}
           <Button variant="soft" onClick={() => go('notifications')}>{state.unread > 0 ? `Notifications (${state.unread} new)` : 'Notifications'}</Button>
           <Button variant="soft" onClick={() => jump('home')}>Browse photographers</Button>
           <Button variant="soft" arrow={false} onClick={signOut}>Sign out</Button>

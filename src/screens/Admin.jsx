@@ -445,3 +445,82 @@ export function AdminReport() {
     </Screen>
   )
 }
+
+/* ---------- Real bank transfers waiting to be sent ---------- */
+function TransferCard({ g, onDone }) {
+  const [ref, setRef] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const held = g.payouts.filter((p) => p.frozen)
+  const payable = g.payouts.filter((p) => !p.frozen)
+  const total = payable.reduce((t, p) => t + p.amount, 0)
+  const send = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await market.completeTransfers(payable.map((p) => p.id), ref.trim())
+      await onDone()
+    } catch (e) {
+      setError(api.explain(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="rounded-2xl bg-surface p-4" data-testid="transfer">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-[15px] font-semibold">{g.name}</div>
+        <div className="font-display text-[20px] font-extrabold">{money(total)}</div>
+      </div>
+      {g.bank ? (
+        <div className="mt-2 rounded-xl bg-white p-3 text-[12.5px] leading-relaxed">
+          <div><span className="text-neutral-500">Bank</span> {g.bank.bank_name} · {g.bank.account_type}</div>
+          <div><span className="text-neutral-500">Account holder</span> {g.bank.account_holder}</div>
+          <div><span className="text-neutral-500">Account number</span> <b className="select-all">{g.bank.account_number}</b></div>
+          {g.bank.branch_code && <div><span className="text-neutral-500">Branch code</span> {g.bank.branch_code}</div>}
+        </div>
+      ) : <p className="mt-2 rounded-xl bg-rose-50 p-3 text-[12.5px] text-rose-700">No bank details on file.</p>}
+      <ul className="mt-2 space-y-0.5 text-[12px] text-neutral-600">
+        {payable.map((p) => <li key={p.id} className="flex justify-between"><span>{p.bookingRef} · {p.type === 'deposit_release' ? 'Early payment' : 'Final payment'}</span><span>{money(p.amount)}</span></li>)}
+        {held.map((p) => <li key={p.id} className="flex justify-between text-rose-700"><span>{p.bookingRef} · on hold (problem report)</span><span>{money(p.amount)}</span></li>)}
+      </ul>
+      {payable.length > 0 && (
+        <>
+          <label htmlFor={`ref-${g.photographerId}`} className="mt-3 block text-[12px] font-semibold text-neutral-600">Bank reference (after you have made the transfer)</label>
+          <input id={`ref-${g.photographerId}`} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. EFT-20261114-01" className={`${inputCls} mt-1`} />
+          {error && <p role="alert" className="mt-2 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+          <div className="mt-3"><Button disabled={busy || ref.trim().length < 3 || !g.bank} onClick={send}>{busy ? 'Saving…' : `Mark ${money(total)} as sent`}</Button></div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function AdminPayouts() {
+  const isAdmin = useAdminGuard()
+  const { jump } = useApp()
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    setError('')
+    try {
+      setItems(await market.listTransfers())
+    } catch (e) {
+      setError(api.explain(e))
+      setItems([])
+    }
+  }, [])
+  useEffect(() => { if (isAdmin) load() }, [isAdmin, load])
+  if (!isAdmin) return <NotAdmin />
+  return (
+    <Screen footer={<Button variant="soft" arrow={false} onClick={load}>Refresh</Button>}>
+      <TopBar title="Payouts to send" onBack={() => jump('account')} />
+      <div className="px-5 pb-4">
+        <p className="mt-2 text-[13px] text-neutral-500">Photographers who asked to withdraw. Pay them from your bank, then enter the bank’s reference here. They are told the money was sent. Test withdrawals never appear here.</p>
+        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="mt-6 text-[13px] text-neutral-500">Loading…</p>}
+        {items?.length === 0 && !error && <Notice className="mt-5" icon={<Icon.Check size={18} />} title="Nothing to send">No withdrawals are waiting for a bank transfer.</Notice>}
+        <div className="mt-5 space-y-3">{items?.map((g) => <TransferCard key={g.photographerId} g={g} onDone={load} />)}</div>
+      </div>
+    </Screen>
+  )
+}

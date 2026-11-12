@@ -333,3 +333,49 @@ export async function loadReport(id) {
 export async function resolveReport(id, outcome, note) {
   must(await supabase.rpc('admin_resolve_dispute', { p_dispute: id, p_outcome: outcome, p_note: note }), 'Could not save the decision.')
 }
+
+/* ------------------------------------------- admin: real bank transfers */
+/** Withdrawals photographers asked for that still need a real bank transfer, grouped by photographer. Test payouts never appear. */
+export async function listTransfers() {
+  const res = await supabase.from('payouts')
+    .select('id, booking_id, photographer_id, amount, type, status, frozen, created_at')
+    .eq('status', 'processing').eq('simulated', false).order('created_at', { ascending: true }).limit(200)
+  must(res, 'Could not load the transfers.')
+  const rows = res.data || []
+  if (!rows.length) return []
+  const pids = [...new Set(rows.map((r) => r.photographer_id))]
+  const bids = [...new Set(rows.map((r) => r.booking_id))]
+  const [ph, banks, refs] = await Promise.all([
+    supabase.from('photographer_profiles').select('id, user_id').in('id', pids),
+    supabase.from('payout_accounts').select('photographer_id, bank_name, account_holder, account_number, account_type, branch_code').in('photographer_id', pids),
+    supabase.from('bookings').select('id, booking_ref').in('id', bids),
+  ])
+  const uids = (ph.data || []).map((x) => x.user_id)
+  const names = uids.length ? await supabase.from('profiles').select('id, full_name').in('id', uids) : { data: [] }
+  const nameOfUser = Object.fromEntries((names.data || []).map((x) => [x.id, x.full_name]))
+  const userOf = Object.fromEntries((ph.data || []).map((x) => [x.id, x.user_id]))
+  const bankOf = Object.fromEntries((banks.data || []).map((x) => [x.photographer_id, x]))
+  const refOf = Object.fromEntries((refs.data || []).map((x) => [x.id, x.booking_ref]))
+  const groups = new Map()
+  for (const r of rows) {
+    if (!groups.has(r.photographer_id)) {
+      groups.set(r.photographer_id, { photographerId: r.photographer_id, name: nameOfUser[userOf[r.photographer_id]] || 'Photographer', bank: bankOf[r.photographer_id] || null, total: 0, payouts: [] })
+    }
+    const g = groups.get(r.photographer_id)
+    g.total += Number(r.amount)
+    g.payouts.push({ id: r.id, amount: Number(r.amount), bookingRef: refOf[r.booking_id] || '', type: r.type, frozen: r.frozen, created_at: r.created_at })
+  }
+  return [...groups.values()]
+}
+/** Marks each of these payouts as paid, with the bank's reference. Frozen ones are skipped by the database and reported back. */
+export async function completeTransfers(payoutIds, reference) {
+  const skipped = []
+  for (const id of payoutIds) {
+    const res = await supabase.rpc('admin_complete_payout', { p_payout: id, p_bank_reference: reference })
+    if (res.error) {
+      if (/on hold|already finished/i.test(res.error.message || '')) skipped.push(id)
+      else must(res, 'Could not mark the payment as sent.')
+    }
+  }
+  return skipped
+}

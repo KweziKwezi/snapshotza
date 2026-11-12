@@ -5,7 +5,7 @@ import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
-import { AdminList, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
+import { AdminList, AdminPayouts, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
 import { Notifications } from './screens/Notifications.jsx'
 import { Availability } from './screens/Calendar.jsx'
 import { Earnings, StudioBookings } from './screens/Earnings.jsx'
@@ -21,6 +21,7 @@ const SCREENS = {
   adminList: AdminList,
   adminReview: AdminReview,
   adminReports: AdminReports,
+  adminPayouts: AdminPayouts,
   adminReport: AdminReport,
   notifications: Notifications,
   home: Home,
@@ -57,7 +58,7 @@ const MENU = [
     ['studio', 'Studio dashboard'], ['availability', 'Hours & availability', true], ['earnings', 'Earnings & withdrawals', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
-  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true]]],
+  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true], ['adminPayouts', 'Payouts to send', true]]],
 ]
 
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.

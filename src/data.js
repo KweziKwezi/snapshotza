@@ -1,4 +1,9 @@
-export const money = (n) => 'R' + Number(n).toLocaleString('en-US')
+// Whole rand amounts show as R4,500; amounts with cents always show two decimals (R2,287.50, never R2,287.5).
+export const money = (n) => {
+  const v = Number(n)
+  const whole = Number.isInteger(v)
+  return 'R' + v.toLocaleString('en-US', whole ? undefined : { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 // What a photographer can specialise in (stored as photographer_profiles.specialties).
 export const SPECIALTIES = ['Matric', 'Wedding', 'Corporate', 'Events', 'Newborn', 'Real estate']

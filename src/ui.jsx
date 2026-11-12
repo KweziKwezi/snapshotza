@@ -284,3 +284,17 @@ export function Lightbox({ photos, index, onClose, onIndex }) {
     </div>
   )
 }
+
+/* ---------- Notification bell with an unread badge ---------- */
+export function NotificationBell({ count = 0, onClick, className = '' }) {
+  return (
+    <button onClick={onClick} aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'} className={`relative ${className}`}>
+      <Icon.Bell size={22} />
+      {count > 0 && (
+        <span data-testid="unread-badge" className="absolute -right-1.5 -top-1.5 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+    </button>
+  )
+}

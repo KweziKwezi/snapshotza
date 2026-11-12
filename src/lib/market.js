@@ -127,7 +127,7 @@ export async function approveGallery(bookingId) {
 /** The signed-in client's bookings, with the photographer and package names filled in. */
 export async function myBookings(userId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id')
     .eq('client_id', userId).order('created_at', { ascending: false }).limit(50)
   must(res, 'Could not load your bookings.')
   const rows = res.data || []
@@ -149,8 +149,13 @@ export async function simulatePayment(bookingId) {
   must(res, 'Could not complete the test payment.')
   return res.data
 }
-export async function simulateShootDone(bookingId) {
-  must(await supabase.rpc('simulate_shoot_done', { p_booking: bookingId }), 'Could not fast-forward the shoot.')
+/** TEST MODE: move the shoot into the past, so the real "mark complete" / "confirm" steps can be tried. */
+export async function simulateShootOver(bookingId) {
+  must(await supabase.rpc('simulate_shoot_over', { p_booking: bookingId }), 'Could not fast-forward the shoot.')
+}
+/** TEST MODE: skip the 24-hour confirmation wait (or the 48-hour photo review wait). */
+export async function simulateSkipWait(bookingId) {
+  must(await supabase.rpc('simulate_skip_wait', { p_booking: bookingId }), 'Could not skip the wait.')
 }
 export async function simulateDelivery(bookingId) {
   must(await supabase.rpc('simulate_delivery', { p_booking: bookingId }), 'Could not mark the photos as delivered.')
@@ -160,7 +165,7 @@ export async function simulateDelivery(bookingId) {
 /** Bookings a photographer has received (paid or later), newest shoot first, with client and package names. */
 export async function studioBookings(photographerId) {
   const res = await supabase.from('bookings')
-    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id')
+    .select('id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id')
     .eq('photographer_id', photographerId)
     .in('status', ['confirmed', 'in_progress', 'gallery_uploaded', 'completed', 'disputed'])
     .order('shoot_starts_at', { ascending: false }).limit(50)
@@ -189,12 +194,12 @@ export async function myEarnings() {
   must(res, 'Could not load your earnings.')
   const r = (Array.isArray(res.data) ? res.data[0] : res.data) || {}
   const n = (v) => Number(v) || 0
-  return { available: n(r.available), processing: n(r.processing), paidOut: n(r.paid_out), inEscrow: n(r.in_escrow), thisMonth: n(r.earned_this_month) }
+  return { available: n(r.available), onHold: n(r.on_hold), processing: n(r.processing), paidOut: n(r.paid_out), inEscrow: n(r.in_escrow), thisMonth: n(r.earned_this_month) }
 }
 
 export async function payoutHistory() {
   const res = await supabase.from('payouts')
-    .select('id, booking_id, amount, type, status, bank_reference, created_at, completed_at, simulated')
+    .select('id, booking_id, amount, type, status, frozen, bank_reference, created_at, completed_at, simulated')
     .order('created_at', { ascending: false }).limit(50)
   must(res, 'Could not load your payouts.')
   const rows = res.data || []
@@ -250,4 +255,81 @@ export async function setDayHours(photographerId, day, start, end) {
     { photographer_id: photographerId, day, is_open: true, start_time: start || null, end_time: end || null },
     { onConflict: 'photographer_id,day' },
   ), 'Could not save the hours for that day.')
+}
+
+/* ------------------------------------------- shoot confirmation & reports */
+export async function markShootComplete(bookingId) {
+  must(await supabase.rpc('mark_shoot_complete', { p_booking: bookingId }), 'Could not mark the shoot complete.')
+}
+export async function confirmShoot(bookingId) {
+  must(await supabase.rpc('confirm_shoot', { p_booking: bookingId }), 'Could not confirm the shoot.')
+}
+export async function reportIssue(bookingId, type, description) {
+  must(await supabase.rpc('report_issue', { p_booking: bookingId, p_type: type, p_description: description }), 'Could not send your report.')
+}
+
+/** The client's 24-hour window: when the shoot is confirmed automatically (null if the photographer has not marked it complete). */
+export function autoConfirmAt(b, hours = 24) {
+  return b.shoot_completed_at ? new Date(new Date(b.shoot_completed_at).getTime() + hours * 3600000) : null
+}
+/** "in 5 h 20 min", "in 40 min", or "any moment now". */
+export function timeLeft(date, now = Date.now()) {
+  const mins = Math.ceil((date.getTime() - now) / 60000)
+  if (mins <= 0) return 'any moment now'
+  const h = Math.floor(mins / 60)
+  return h > 0 ? `in ${h} h ${mins % 60} min` : `in ${mins} min`
+}
+
+/* ------------------------------------------------------- notifications */
+export async function listNotifications() {
+  const res = await supabase.from('notifications').select('id, type, title, body, booking_id, created_at, read_at')
+    .order('created_at', { ascending: false }).limit(50)
+  must(res, 'Could not load your notifications.')
+  return res.data || []
+}
+export async function unreadCount() {
+  const res = await supabase.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null)
+  return res.error ? 0 : res.count || 0
+}
+export async function markAllRead() {
+  must(await supabase.from('notifications').update({ read_at: new Date().toISOString() }).is('read_at', null))
+}
+
+/* ------------------------------------------------- admin: problem reports */
+export async function listReports(status = 'open') {
+  const open = ['open', 'investigating']
+  let q = supabase.from('disputes').select('id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by')
+  q = status === 'open' ? q.in('status', open) : q.not('status', 'in', `(${open.join(',')})`)
+  const res = await q.order('created_at', { ascending: status === 'open' }).limit(50)
+  must(res, 'Could not load the reports.')
+  const rows = res.data || []
+  if (!rows.length) return []
+  const refs = await supabase.from('bookings').select('id, booking_ref').in('id', [...new Set(rows.map((r) => r.booking_id))])
+  const rm = Object.fromEntries((refs.data || []).map((x) => [x.id, x.booking_ref]))
+  return rows.map((r) => ({ ...r, bookingRef: rm[r.booking_id] || '' }))
+}
+export async function openReportCount() {
+  const res = await supabase.from('disputes').select('id', { count: 'exact', head: true }).in('status', ['open', 'investigating'])
+  return res.error ? 0 : res.count || 0
+}
+/** Everything an admin needs to decide: the report, the booking, both people, and the money so far. */
+export async function loadReport(id) {
+  const d = await supabase.from('disputes').select('*').eq('id', id).maybeSingle()
+  must(d, 'Could not load this report.')
+  if (!d.data) throw new Error('This report was not found.')
+  const b = await supabase.from('bookings').select('*').eq('id', d.data.booking_id).maybeSingle()
+  must(b, 'Could not load the booking.')
+  const bk = b.data
+  const [client, photog, pay, pack] = await Promise.all([
+    supabase.from('profiles').select('id, full_name, email, phone').eq('id', bk.client_id).maybeSingle(),
+    supabase.from('photographer_profiles').select('id, user_id, strike_count, verification_status').eq('id', bk.photographer_id).maybeSingle(),
+    supabase.from('payouts').select('id, amount, type, status, frozen, simulated').eq('booking_id', bk.id),
+    supabase.from('packages').select('name').eq('id', bk.package_id).maybeSingle(),
+  ])
+  const pu = photog.data?.user_id
+  const pprof = pu ? await supabase.from('profiles').select('id, full_name, email, phone').eq('id', pu).maybeSingle() : { data: null }
+  return { report: d.data, booking: bk, client: client.data, photographer: { ...(photog.data || {}), ...(pprof.data || {}) }, payouts: pay.data || [], packageName: pack.data?.name || 'Package' }
+}
+export async function resolveReport(id, outcome, note) {
+  must(await supabase.rpc('admin_resolve_dispute', { p_dispute: id, p_outcome: outcome, p_note: note }), 'Could not save the decision.')
 }

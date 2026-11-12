@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from '../store.jsx'
 import { signIn, signUp, sendPasswordReset } from '../lib/auth.js'
 import { supabaseConfigured } from '../lib/supabase.js'
+import { openReportCount } from '../lib/market.js'
 import { AppNav } from './Client.jsx'
 import { Button, Checkbox, Field, H1, Icon, Notice, Screen, Segmented, TopBar, inputCls } from '../ui.jsx'
 
@@ -106,8 +107,12 @@ export function Auth() {
 
 /* ---------- Account (client profile tab / admin landing) ---------- */
 export function Account() {
-  const { auth, signOut, jump, go } = useApp()
+  const { auth, signOut, jump, go, state } = useApp()
   const p = auth.profile
+  const [openReports, setOpenReports] = useState(0)
+  useEffect(() => {
+    if (p?.role === 'admin') openReportCount().then(setOpenReports).catch(() => {})
+  }, [p?.role])
   return (
     <Screen nav={<AppNav active="profile" />}>
       <div className="px-5 pt-3">
@@ -122,6 +127,8 @@ export function Account() {
         )}
         <div className="mt-5 space-y-3">
           {p?.role === 'admin' && <Button onClick={() => go('adminList')}>Review photographers</Button>}
+          {p?.role === 'admin' && <Button onClick={() => go('adminReports')}>{openReports > 0 ? `Problem reports (${openReports} open)` : 'Problem reports'}</Button>}
+          <Button variant="soft" onClick={() => go('notifications')}>{state.unread > 0 ? `Notifications (${state.unread} new)` : 'Notifications'}</Button>
           <Button variant="soft" onClick={() => jump('home')}>Browse photographers</Button>
           <Button variant="soft" arrow={false} onClick={signOut}>Sign out</Button>
         </div>

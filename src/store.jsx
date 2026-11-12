@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase, supabaseConfigured } from './lib/supabase.js'
 import { loadAccount, signOut as apiSignOut } from './lib/auth.js'
 import { loadStudio, studioState } from './lib/studio.js'
-import { getTestMode } from './lib/market.js'
+import { getTestMode, unreadCount } from './lib/market.js'
 
 const Ctx = createContext(null)
 export const useApp = () => useContext(Ctx)
@@ -18,6 +18,7 @@ const initial = {
   bookingStage: 'shoot_done', // paid -> shoot_done -> delivered -> released
   bookingRef: 'SZ-2048',
   paid: false,
+  unread: 0, // unread in-app notifications for the signed-in user
   sim: false, // TEST MODE: payments and payouts are simulated (platform_settings.simulate_payments)
   selected: null, // live marketplace: { p, packages, portfolio, reviews } for the photographer being viewed
   reservation: null, // the booking just created (awaiting payment)
@@ -84,6 +85,22 @@ export function AppProvider({ children, start = 'splash' }) {
     getTestMode().then((sim) => setState((s) => ({ ...s, sim }))).catch(() => {})
   }, [])
 
+  // Unread notifications: checked when someone signs in, every 45 seconds, and whenever the app comes back to the front.
+  const uid = auth.status === 'in' ? auth.user?.id : null
+  const refreshUnread = useCallback(async () => {
+    if (!uid) return
+    const n = await unreadCount()
+    setState((s) => (s.unread === n ? s : { ...s, unread: n }))
+  }, [uid])
+  useEffect(() => {
+    if (!uid) return undefined
+    refreshUnread()
+    const timer = setInterval(refreshUnread, 45000)
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshUnread() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [uid, refreshUnread])
+
   // Keep the session in sync. (The callback must not await Supabase calls directly, so defer with setTimeout.)
   useEffect(() => {
     if (!supabaseConfigured) return undefined
@@ -103,8 +120,8 @@ export function AppProvider({ children, start = 'splash' }) {
   }, [])
 
   const value = useMemo(
-    () => ({ screen: stack[stack.length - 1], state, set, go, back, jump, auth, refreshAccount, signOut }),
-    [stack, state, set, go, back, jump, auth, refreshAccount, signOut],
+    () => ({ screen: stack[stack.length - 1], state, set, go, back, jump, auth, refreshAccount, signOut, refreshUnread }),
+    [stack, state, set, go, back, jump, auth, refreshAccount, signOut, refreshUnread],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

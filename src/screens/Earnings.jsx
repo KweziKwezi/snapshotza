@@ -4,6 +4,7 @@ import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
 import { DAYS_SHORT, MONTHS, money } from '../data.js'
 import { AppNav } from './Client.jsx'
+import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import { Button, H1, Icon, Notice, Screen, TopBar } from '../ui.jsx'
 
 const TestTag = () => <span className="rounded bg-ink px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-brand">TEST</span>
@@ -35,7 +36,7 @@ export function Earnings() {
       setHistory(h)
     } catch (e) {
       setError(explain(e))
-      setEarn((v) => v || { available: 0, processing: 0, paidOut: 0, inEscrow: 0, thisMonth: 0 })
+      setEarn((v) => v || { available: 0, onHold: 0, processing: 0, paidOut: 0, inEscrow: 0, thisMonth: 0 })
       setHistory((v) => v || [])
     }
   }, [])
@@ -100,6 +101,7 @@ export function Earnings() {
         <div className="mt-5 grid grid-cols-2 gap-3">
           {[
             ['In escrow', earn?.inEscrow, 'Paid by clients, not yet released'],
+            ...(earn?.onHold > 0 ? [['On hold', earn.onHold, 'Frozen while a problem is reviewed']] : []),
             ['Processing', earn?.processing, 'Withdrawals being sent'],
             ['Paid out', earn?.paidOut, 'Sent to your bank'],
             ['This month', earn?.thisMonth, 'Released to you'],
@@ -117,7 +119,7 @@ export function Earnings() {
         {history?.length === 0 && <p className="rounded-2xl bg-surface p-4 text-[13px] text-neutral-600">No payments yet. They appear here after a client has paid and the shoot is done.</p>}
         <div className="space-y-2.5">
           {history?.map((h) => {
-            const [label, tone] = PAYOUT_STATUS[h.status] || [h.status, 'bg-surface']
+            const [label, tone] = h.frozen && h.status === 'pending' ? ['On hold', 'bg-rose-50 text-rose-700'] : PAYOUT_STATUS[h.status] || [h.status, 'bg-surface']
             const d = new Date(h.created_at)
             return (
               <div key={h.id} className="flex items-center gap-3 rounded-2xl bg-surface p-3.5">
@@ -152,7 +154,8 @@ function StudioBookingCard({ b, sim, onChanged }) {
   const [error, setError] = useState('')
   const [label, tone] = BOOKING_STATUS[b.status] || [b.status, 'bg-surface']
   const when = new Date(`${b.shoot_date}T00:00:00`)
-  const shootOver = new Date(b.shoot_ends_at).getTime() <= Date.now()
+  const started = hasStarted(b)
+  const autoAt = market.autoConfirmAt(b)
   const testable = sim && b.simulated
   const run = async (key, fn) => {
     setBusy(key)
@@ -183,26 +186,46 @@ function StudioBookingCard({ b, sim, onChanged }) {
         <span className="text-right text-[11px]">You earn<br /><b className="font-display text-[17px] text-ink">{money(b.net)}</b></span>
       </div>
 
-      {b.status === 'confirmed' && !shootOver && <p className="mt-3 text-[12px] text-neutral-600">Paid and held securely. Your first payment is released 24 hours after the shoot.</p>}
-      {testable && b.status === 'confirmed' && !shootOver && (
-        <div className="mt-3">
-          <Button variant="soft" disabled={Boolean(busy)} onClick={() => run('done', () => market.simulateShootDone(b.id))}>{busy === 'done' ? 'Working…' : 'Test: the shoot is done'}</Button>
+      {b.status === 'confirmed' && !b.shoot_completed_at && (
+        <div className="mt-3" data-testid="mark-complete">
+          <p className="mb-2.5 text-[12px] text-neutral-600">
+            {started
+              ? 'Once the shoot is done, mark it complete. Your client then confirms it and your first payment is released.'
+              : `Paid and held securely. You can mark the shoot complete from ${startLabel(b)}.`}
+          </p>
+          <Button disabled={!started || Boolean(busy)} onClick={() => run('complete', () => market.markShootComplete(b.id))}>
+            {busy === 'complete' ? 'Saving…' : started ? 'Mark shoot complete' : `Available ${startLabel(b)}`}
+          </Button>
+          {testable && !started && (
+            <Button className="mt-2.5" variant="dark" disabled={Boolean(busy)} onClick={() => run('over', () => market.simulateShootOver(b.id))}>{busy === 'over' ? 'Working…' : 'Test: jump to after the shoot'}</Button>
+          )}
         </div>
       )}
-      {(b.status === 'confirmed' || b.status === 'in_progress') && shootOver && (
+      {b.status === 'confirmed' && b.shoot_completed_at && !b.deposit_released_at && (
+        <div className="mt-3" data-testid="waiting-confirm">
+          <p className="text-[12.5px] text-neutral-700">
+            <b>Waiting for your client to confirm.</b> Your first payment is queued the moment they do. If they don’t respond, it’s confirmed automatically <b>{market.timeLeft(autoAt)}</b>.
+          </p>
+          {testable && <Button className="mt-2.5" variant="dark" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 24-hour wait'}</Button>}
+        </div>
+      )}
+      {b.status === 'in_progress' && (
         <>
-          <p className="mt-3 text-[12px] text-neutral-600">{b.status === 'in_progress' ? 'Your first payment has been released. Deliver the photos to get the rest.' : 'Deliver the photos to get paid.'}</p>
+          <p className="mt-3 text-[12px] text-neutral-600">{b.shoot_confirmed_at ? 'Your client confirmed the shoot.' : 'The shoot was confirmed automatically.'} Your first payment has been released. Deliver the photos to get the rest.</p>
           {testable ? (
             <div className="mt-3">
-              <Button variant="soft" disabled={Boolean(busy)} onClick={() => run('deliver', () => market.simulateDelivery(b.id))}>{busy === 'deliver' ? 'Working…' : 'Test: deliver the photos'}</Button>
+              <Button variant="dark" disabled={Boolean(busy)} onClick={() => run('deliver', () => market.simulateDelivery(b.id))}>{busy === 'deliver' ? 'Working…' : 'Test: deliver the photos'}</Button>
             </div>
           ) : (
             <p className="mt-2 text-[12px] text-neutral-500">Photo upload is coming soon.</p>
           )}
         </>
       )}
+      {b.status === 'disputed' && <p className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">A problem was reported on this booking. Any payment that hasn’t been withdrawn is on hold while our team reviews it.</p>}
       {b.status === 'gallery_uploaded' && <p className="mt-3 text-[12px] text-neutral-600">Waiting for the client to approve. The rest is released when they approve, or automatically after 48 hours.</p>}
+      {testable && b.status === 'gallery_uploaded' && <Button className="mt-2.5" variant="dark" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 48-hour wait'}</Button>}
       {b.status === 'completed' && <p className="mt-3 text-[12px] text-neutral-600">All paid out. Withdraw it from Earnings.</p>}
+      <ReportLink b={b} role="photographer" onChanged={onChanged} />
       <ErrorNote error={error} />
     </div>
   )

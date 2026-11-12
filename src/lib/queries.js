@@ -28,9 +28,13 @@ export const APP_SELECTS = [
   ['photographer_profiles', 'work_start, work_end'],
   ['platform_settings', 'simulate_payments'],
   ['bookings', 'shoot_date'],
-  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id'],
-  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id'],
-  ['payouts', 'id, booking_id, amount, type, status, bank_reference, created_at, completed_at, simulated'],
+  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, simulated, created_at, photographer_id, package_id'],
+  ['bookings', 'id, booking_ref, status, payment_status, shoot_date, shoot_time, shoot_starts_at, shoot_ends_at, shoot_completed_at, shoot_confirmed_at, deposit_released_at, gallery_uploaded_at, total_amount, platform_fee, transaction_fee, simulated, client_id, package_id'],
+  ['payouts', 'id, booking_id, amount, type, status, frozen, bank_reference, created_at, completed_at, simulated'],
+  ['notifications', 'id, type, title, body, booking_id, created_at, read_at'],
+  ['disputes', 'id, booking_id, type, description, status, resolution, created_at, resolved_at, raised_by'],
+  ['disputes', '*'],
+  ['payouts', 'id, amount, type, status, frozen, simulated'],
 ]
 
 /** Database functions the app calls (name, arguments). Sent anonymously; a harmless "not allowed" answer is fine. */
@@ -41,6 +45,11 @@ export const APP_RPCS = [
   ['my_earnings', {}],
   ['request_withdrawal', {}],
   ['simulate_payment', { p_booking: NIL }],
-  ['simulate_shoot_done', { p_booking: NIL }],
+  ['simulate_shoot_over', { p_booking: NIL }],
+  ['simulate_skip_wait', { p_booking: NIL }],
+  ['mark_shoot_complete', { p_booking: NIL }],
+  ['confirm_shoot', { p_booking: NIL }],
+  ['report_issue', { p_booking: NIL, p_type: 'other', p_description: 'check' }],
+  ['admin_resolve_dispute', { p_dispute: NIL, p_outcome: 'dismiss', p_note: 'check' }],
   ['simulate_delivery', { p_booking: NIL }],
 ]

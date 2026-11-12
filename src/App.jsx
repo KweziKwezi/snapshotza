@@ -5,7 +5,8 @@ import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
 } from './screens/Client.jsx'
 import { Account, Auth, homeFor } from './screens/Auth.jsx'
-import { AdminList, AdminReview } from './screens/Admin.jsx'
+import { AdminList, AdminReport, AdminReports, AdminReview } from './screens/Admin.jsx'
+import { Notifications } from './screens/Notifications.jsx'
 import { Availability } from './screens/Calendar.jsx'
 import { Earnings, StudioBookings } from './screens/Earnings.jsx'
 import { supabaseConfigured } from './lib/supabase.js'
@@ -19,6 +20,9 @@ const SCREENS = {
   earnings: Earnings,
   adminList: AdminList,
   adminReview: AdminReview,
+  adminReports: AdminReports,
+  adminReport: AdminReport,
+  notifications: Notifications,
   home: Home,
   profile: Profile,
   date: ChooseDate,
@@ -45,7 +49,7 @@ function BookingsRoute() {
 
 const MENU = [
   ['Client', [
-    ['splash', 'Welcome'], ['auth', 'Sign in / sign up', true], ['account', 'Account', true], ['home', 'Home'], ['profile', 'Photographer profile'], ['date', 'Choose date'],
+    ['splash', 'Welcome'], ['auth', 'Sign in / sign up', true], ['account', 'Account', true], ['notifications', 'Notifications', true], ['home', 'Home'], ['profile', 'Photographer profile'], ['date', 'Choose date'],
     ['review', 'Review & pay'], ['payment', 'Payment method', true], ['protection', 'Payment protection', true],
     ['gateway', 'Gateway hand-off (mock)', true], ['confirmed', 'Booking confirmed'], ['bookings', 'My bookings & escrow', true], ['chat', 'Chat'],
   ]],
@@ -53,7 +57,7 @@ const MENU = [
     ['studio', 'Studio dashboard'], ['availability', 'Hours & availability', true], ['earnings', 'Earnings & withdrawals', true], ['onbProfile', 'Onboarding 1 · Profile'], ['onbPortfolio', 'Onboarding 2 · Portfolio'],
     ['onbPackages', 'Onboarding 3 · Packages'], ['payouts', 'Onboarding 4 · Payouts (bank)', true], ['verify', 'Onboarding 5 · Verification'],
   ]],
-  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true]]],
+  ['Admin', [['adminList', 'Photographer reviews', true], ['adminReview', 'Review one photographer', true], ['adminReports', 'Problem reports', true], ['adminReport', 'One problem report', true]]],
 ]
 
 // The phone frame + screen menu is a design-review tool. It shows in local dev, or on the live site with ?preview.

@@ -3,8 +3,9 @@ import { useApp } from '../store.jsx'
 import { supabaseConfigured } from '../lib/supabase.js'
 import * as market from '../lib/market.js'
 import { explain } from '../lib/studio.js'
+import { ReportLink, hasStarted, startLabel } from './BookingParts.jsx'
 import {
-  Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, Photo, Screen, Stepper, TopBar, initials,
+  Avatar, BottomNav, Button, Checkbox, H1, Icon, Lightbox, Notice, NotificationBell, Photo, Screen, Stepper, TopBar, initials,
 } from '../ui.jsx'
 import {
   CATEGORIES, DAYS_SHORT, GALLERY_RETENTION_DAYS, MONTHS, PAY_METHODS, PHOTOGRAPHERS, SPECIALTIES, TIMES, isAvailable, money, packagesFor,
@@ -261,7 +262,7 @@ export function Home() {
               <Icon.Pin size={14} /> South Africa
             </div>
           </div>
-          <button aria-label="Notifications" className="mt-1"><Icon.Bell size={22} /></button>
+          <NotificationBell count={auth.status === 'in' ? state.unread : 0} className="mt-1" onClick={() => (auth.status === 'in' ? go('notifications') : go('auth'))} />
         </div>
 
         <H1 className="mt-5 text-[32px]">
@@ -1083,6 +1084,9 @@ function ClientBookingCard({ b, sim, onChanged }) {
   const fee = Number(b.platform_fee)
   const awaiting = b.status === 'pending' && label === 'Awaiting payment'
   const hoursToShoot = (new Date(b.shoot_starts_at).getTime() - Date.now()) / 3600000
+  const started = hasStarted(b)
+  const testable = sim && b.simulated
+  const autoAt = market.autoConfirmAt(b)
 
   const run = async (key, fn) => {
     setBusy(key)
@@ -1128,10 +1132,37 @@ function ClientBookingCard({ b, sim, onChanged }) {
         <p className="mt-3 flex items-center gap-1.5 text-[12px] text-link"><Icon.Lock size={13} /> Held securely until your photos are delivered.</p>
       )}
 
+      {b.status === 'confirmed' && !b.deposit_released_at && !started && (
+        <>
+          <p className="mt-2 text-[12px] text-neutral-600">Your shoot starts {startLabel(b)}. After it, you’ll be asked to confirm it happened.</p>
+          {testable && <Button className="mt-3" variant="soft" disabled={Boolean(busy)} onClick={() => run('over', () => market.simulateShootOver(b.id))}>{busy === 'over' ? 'Working…' : 'Test: jump to after the shoot'}</Button>}
+        </>
+      )}
+      {b.status === 'confirmed' && !b.deposit_released_at && started && (
+        <div className="mt-3 rounded-xl bg-white p-3.5" data-testid="confirm-shoot">
+          <div className="text-[14px] font-semibold">Did your shoot happen?</div>
+          {autoAt ? (
+            <p className="mt-1 text-[12.5px] text-neutral-600">
+              Your photographer says the shoot is complete. Confirm it to release their first payment. If we don’t hear from you, it’s confirmed automatically <b>{market.timeLeft(autoAt)}</b>.
+            </p>
+          ) : (
+            <p className="mt-1 text-[12.5px] text-neutral-600">Once your shoot is done, confirm it here. This releases your photographer’s first payment. The rest is only paid after you get your photos.</p>
+          )}
+          <div className="mt-3 space-y-2">
+            <Button disabled={Boolean(busy)} onClick={() => run('confirm', () => market.confirmShoot(b.id))}>{busy === 'confirm' ? 'Confirming…' : 'Yes, my shoot happened'}</Button>
+            {testable && autoAt && <Button variant="soft" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 24-hour wait'}</Button>}
+          </div>
+        </div>
+      )}
+      {b.status === 'in_progress' && b.shoot_confirmed_at && <p className="mt-2 text-[12px] text-neutral-600">You confirmed the shoot. Your photographer is preparing your photos.</p>}
+      {b.status === 'in_progress' && !b.shoot_confirmed_at && <p className="mt-2 text-[12px] text-neutral-600">The shoot was confirmed automatically. Your photographer is preparing your photos.</p>}
+      {b.status === 'disputed' && <p className="mt-3 rounded-xl bg-white p-3 text-[12.5px] text-neutral-700">Our team is reviewing the problem you reported. Payments are on hold. We’ll tell you what we decide.</p>}
+
       {b.status === 'gallery_uploaded' && (
         <div className="mt-3 space-y-2">
           <p className="text-[12px] text-neutral-600">Your photos are ready. Approve them to release the rest of the payment, or it releases automatically after 48 hours.</p>
           <Button disabled={Boolean(busy)} onClick={() => run('approve', () => market.approveGallery(b.id))}>{busy === 'approve' ? 'Approving…' : 'Approve photos & release payment'}</Button>
+          {testable && <Button variant="soft" disabled={Boolean(busy)} onClick={() => run('skip', () => market.simulateSkipWait(b.id))}>{busy === 'skip' ? 'Working…' : 'Test: skip the 48-hour wait'}</Button>}
         </div>
       )}
 
@@ -1150,6 +1181,7 @@ function ClientBookingCard({ b, sim, onChanged }) {
         </div>
       )}
 
+      <ReportLink b={b} role="client" onChanged={onChanged} />
       {b.status === 'cancelled' && b.payment_status === 'refunded' && <p className="mt-3 text-[12px] text-neutral-500">Refunded{b.simulated ? ' (test)' : ''}.</p>}
       {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
     </div>

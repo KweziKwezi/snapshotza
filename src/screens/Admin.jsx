@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../store.jsx'
 import * as api from '../lib/studio.js'
+import * as market from '../lib/market.js'
+import { ago } from './Notifications.jsx'
 import { MIN_PORTFOLIO_PHOTOS, money } from '../data.js'
 import { Button, H1, Icon, Notice, Photo, Screen, TopBar, inputCls } from '../ui.jsx'
 
@@ -238,6 +240,207 @@ export function AdminReview() {
             <div className="h-4" />
           </>
         )}
+      </div>
+    </Screen>
+  )
+}
+
+/* ---------- Problem reports ---------- */
+const REPORT_TYPE = {
+  photographer_no_show: 'Photographer did not show up',
+  client_no_show: 'Client did not show up',
+  not_delivered: 'Photos not delivered',
+  poor_quality: 'Photos not as agreed',
+  other: 'Something else',
+}
+const REPORT_STATUS = {
+  open: ['Open', 'bg-rose-50 text-rose-700'],
+  investigating: ['Looking into it', 'bg-cream text-amber-700'],
+  resolved_client: ['Client refunded', 'bg-surface text-neutral-600'],
+  resolved_photographer: ['Photographer paid', 'bg-surface text-neutral-600'],
+  closed: ['Dismissed', 'bg-surface text-neutral-600'],
+}
+
+export function AdminReports() {
+  const isAdmin = useAdminGuard()
+  const { go, jump, set } = useApp()
+  const [tab, setTab] = useState('open')
+  const [items, setItems] = useState(null)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setError('')
+    setItems(null)
+    try {
+      setItems(await market.listReports(tab))
+    } catch (e) {
+      setError(api.explain(e))
+      setItems([])
+    }
+  }, [tab])
+  useEffect(() => { if (isAdmin) load() }, [isAdmin, load])
+  if (!isAdmin) return <NotAdmin />
+
+  return (
+    <Screen footer={<Button variant="soft" arrow={false} onClick={load}>Refresh</Button>}>
+      <TopBar title="Problem reports" onBack={() => jump('account')} />
+      <div className="px-5 pb-4">
+        <div className="mt-2 flex gap-2" role="tablist">
+          {[['open', 'Open'], ['decided', 'Decided']].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${tab === id ? 'bg-ink text-white' : 'bg-surface text-neutral-600'}`}>{label}</button>
+          ))}
+        </div>
+        {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+        {items === null && <p className="mt-6 text-[13px] text-neutral-500">Loading…</p>}
+        {items?.length === 0 && !error && (
+          <Notice className="mt-5" icon={<Icon.Check size={18} />} title={tab === 'open' ? 'All caught up' : 'Nothing decided yet'}>
+            {tab === 'open' ? 'No problem reports are waiting for a decision.' : 'Reports you have decided will appear here.'}
+          </Notice>
+        )}
+        <div className="mt-5 space-y-3">
+          {items?.map((r) => {
+            const [label, tone] = REPORT_STATUS[r.status] || [r.status, 'bg-surface']
+            return (
+              <button key={r.id} onClick={() => { set({ adminReportId: r.id }); go('adminReport') }} className="flex w-full items-center gap-3 rounded-2xl bg-surface p-4 text-left">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14.5px] font-semibold">{REPORT_TYPE[r.type] || r.type}</span>
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[12.5px] text-neutral-600">{r.description}</div>
+                  <div className="mt-1.5 flex items-center gap-2 text-[11px] text-neutral-400">
+                    <span>{r.bookingRef}</span><span>·</span><span>{ago(r.created_at)}</span>
+                    <span className={`rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${tone}`}>{label}</span>
+                  </div>
+                </div>
+                <Icon.Chevron size={18} />
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </Screen>
+  )
+}
+
+const OUTCOMES = [
+  ['refund_client', 'Refund the client', 'Cancels the booking and refunds what has not been paid to the photographer. Unsent payments are cancelled.'],
+  ['pay_photographer', 'Pay the photographer', 'Marks the booking complete and releases the full amount to the photographer.'],
+  ['dismiss', 'Dismiss the report', 'No action. The booking carries on as normal and held payments are released again.'],
+]
+
+export function AdminReport() {
+  const isAdmin = useAdminGuard()
+  const { back, state } = useApp()
+  const id = state.adminReportId
+  const [pack, setPack] = useState(null)
+  const [error, setError] = useState('')
+  const [outcome, setOutcome] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      setPack(await market.loadReport(id))
+    } catch (e) {
+      setError(api.explain(e))
+    }
+  }, [id])
+  useEffect(() => { if (isAdmin && id) load() }, [isAdmin, id, load])
+  if (!isAdmin) return <NotAdmin />
+
+  const decide = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await market.resolveReport(id, outcome, note.trim())
+      setDone(true)
+      await load()
+    } catch (e) {
+      setError(api.explain(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!pack) {
+    return (
+      <Screen>
+        <TopBar title="Report" onBack={back} />
+        <div className="px-5 pt-6">{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p> : <p className="text-[13px] text-neutral-500">Loading…</p>}</div>
+      </Screen>
+    )
+  }
+  const { report: r, booking: b, client, photographer: ph, payouts } = pack
+  const open = r.status === 'open' || r.status === 'investigating'
+  const [slabel, stone] = REPORT_STATUS[r.status] || [r.status, 'bg-surface']
+  const raisedByClient = r.raised_by === b.client_id
+  const noShow = outcome === 'refund_client' && r.type === 'photographer_no_show'
+  const paidOut = payouts.filter((p) => p.status !== 'failed').reduce((t, p) => t + Number(p.amount), 0)
+
+  return (
+    <Screen>
+      <TopBar title={b.booking_ref} onBack={back} />
+      <div className="px-5 pb-8">
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <H1 className="text-[26px]">{REPORT_TYPE[r.type] || r.type}</H1>
+          <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${stone}`}>{slabel}</span>
+        </div>
+        <p className="mt-1 text-[12px] text-neutral-500">Reported by the {raisedByClient ? 'client' : 'photographer'} · {ago(r.created_at)}</p>
+        <blockquote className="mt-3 rounded-2xl bg-surface p-4 text-[14px] leading-snug">{r.description}</blockquote>
+
+        <Section title="The booking">
+          <Row k="Package" v={pack.packageName} />
+          <Row k="Shoot" v={`${b.shoot_date} at ${String(b.shoot_time).slice(0, 5)}`} />
+          <Row k="Booking status" v={b.status.replace('_', ' ')} />
+          <Row k="Client paid" v={money(Number(b.total_amount))} />
+          <Row k="Fees (platform + gateway)" v={money(Number(b.platform_fee) + Number(b.transaction_fee))} />
+          <Row k="Shoot marked complete" v={b.shoot_completed_at ? new Date(b.shoot_completed_at).toLocaleString('en-ZA') : 'No'} />
+          <Row k="Client confirmed" v={b.shoot_confirmed_at ? new Date(b.shoot_confirmed_at).toLocaleString('en-ZA') : 'No'} />
+          {b.simulated && <Row k="Payment" v="Test payment" />}
+        </Section>
+
+        <Section title="People">
+          <Row k="Client" v={client?.full_name} />
+          <Row k="Client contact" v={[client?.email, client?.phone].filter(Boolean).join(' · ')} />
+          <Row k="Photographer" v={ph?.full_name} />
+          <Row k="Photographer contact" v={[ph?.email, ph?.phone].filter(Boolean).join(' · ')} />
+          <Row k="Earlier strikes" v={String(ph?.strike_count ?? 0)} />
+        </Section>
+
+        <Section title={`Payments (${money(paidOut)} released so far)`}>
+          {payouts.length === 0 && <p className="text-[13px] text-neutral-500">Nothing has been released to the photographer yet.</p>}
+          {payouts.map((p) => (
+            <Row key={p.id} k={`${p.type === 'deposit_release' ? 'Early payment' : 'Final payment'} · ${p.frozen && p.status === 'pending' ? 'on hold' : p.status}`} v={money(Number(p.amount))} />
+          ))}
+        </Section>
+
+        {!open && (
+          <Notice className="mt-6" icon={<Icon.Check size={18} />} title="Decided">
+            {r.resolution ? <>Your note: “{r.resolution}”</> : 'This report has been decided.'}
+          </Notice>
+        )}
+
+        {open && (
+          <Section title="Your decision">
+            <div className="space-y-2.5" role="radiogroup" aria-label="Decision">
+              {OUTCOMES.map(([val, label, hint]) => (
+                <button key={val} role="radio" aria-checked={outcome === val} onClick={() => setOutcome(val)} className={`block w-full rounded-2xl p-3.5 text-left ${outcome === val ? 'bg-brand' : 'bg-surface'}`}>
+                  <div className="text-[14px] font-semibold">{label}</div>
+                  <div className="mt-0.5 text-[12px] text-neutral-700">{hint}</div>
+                </button>
+              ))}
+            </div>
+            {noShow && <Notice className="mt-3" tone="cream" title="The photographer will be suspended">Refunding a photographer no-show suspends the photographer and adds a strike.</Notice>}
+            <label htmlFor="decision-note" className="mt-4 block text-[12px] font-semibold text-neutral-600">Note to both people (required)</label>
+            <textarea id="decision-note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={500} placeholder="Why did you decide this?" className={`${inputCls} mt-1 h-auto py-2.5`} />
+            {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+            <div className="mt-4">
+              <Button disabled={!outcome || note.trim().length < 5 || busy} onClick={decide}>{busy ? 'Saving…' : 'Confirm decision'}</Button>
+            </div>
+          </Section>
+        )}
+        {done && !open && <p className="mt-3 text-[12.5px] text-ok">Decision saved. Both people were notified.</p>}
       </div>
     </Screen>
   )

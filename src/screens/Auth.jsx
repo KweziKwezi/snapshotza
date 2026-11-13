@@ -5,6 +5,7 @@ import { PHONE_HINT, formatPhone, normalizePhone } from '../lib/phone.js'
 import { supabaseConfigured } from '../lib/supabase.js'
 import { bankCheckCount, openReportCount, refundCount } from '../lib/market.js'
 import { AppNav } from './Client.jsx'
+import { AdminTwoStep } from './Admin.jsx'
 import { Button, Checkbox, Field, H1, Icon, Notice, Screen, Segmented, TopBar, inputCls } from '../ui.jsx'
 
 const emailOk = (v) => /^\S+@\S+\.\S+$/.test(v.trim())
@@ -51,7 +52,7 @@ export function Auth() {
     const res = signup ? await signUp({ email, password, fullName, phone: normalizePhone(phone), role }) : await signIn({ email, password })
     setBusy(false)
     if (res.error) return setError(res.error)
-    if (res.needsConfirm) setInfo(`We sent a confirmation link to ${email.trim()}. Open it, then come back and sign in.`)
+    if (res.needsConfirm) setInfo(`If ${email.trim()} is new to SnapshotZA, we sent it a confirmation link: open it, then come back and sign in. Already have an account? Sign in instead.`)
   }
   const forgot = async () => {
     if (!emailOk(email)) return setError('Enter your email above first.')
@@ -116,15 +117,16 @@ export function Auth() {
 export function Account() {
   const { auth, signOut, jump, go, state } = useApp()
   const p = auth.profile
+  const admin = p?.role === 'admin' && auth.aal === 'aal2'
   const [openReports, setOpenReports] = useState(0)
   const [bankChecks, setBankChecks] = useState(0)
   const [refunds, setRefunds] = useState(0)
   useEffect(() => {
-    if (p?.role !== 'admin') return
+    if (!admin) return
     openReportCount().then(setOpenReports).catch(() => {})
     bankCheckCount().then(setBankChecks).catch(() => {})
     refundCount().then(setRefunds).catch(() => {})
-  }, [p?.role])
+  }, [admin])
   return (
     <Screen nav={<AppNav active="profile" />}>
       <div className="px-5 pt-3">
@@ -142,15 +144,13 @@ export function Account() {
             <Icon.Chevron size={18} />
           </button>
         )}
-        {p?.role === 'admin' && (
-          <Notice className="mt-4" icon={<Icon.Shield size={18} />} title="Admin account">Review new photographers before they can take bookings.</Notice>
-        )}
+        {p?.role === 'admin' && <div className="mt-4"><AdminTwoStep /></div>}
         <div className="mt-5 space-y-3">
-          {p?.role === 'admin' && <Button onClick={() => go('adminList')}>Review photographers</Button>}
-          {p?.role === 'admin' && <Button onClick={() => go('adminReports')}>{openReports > 0 ? `Problem reports (${openReports} open)` : 'Problem reports'}</Button>}
-          {p?.role === 'admin' && <Button onClick={() => go('adminPayouts')}>Payouts to send</Button>}
-          {p?.role === 'admin' && <Button onClick={() => go('adminRefunds')}>{refunds > 0 ? `Refunds to send (${refunds})` : 'Refunds to send'}</Button>}
-          {p?.role === 'admin' && <Button onClick={() => go('adminBanks')}>{bankChecks > 0 ? `Bank checks (${bankChecks} waiting)` : 'Bank checks'}</Button>}
+          {admin && <Button onClick={() => go('adminList')}>Review photographers</Button>}
+          {admin && <Button onClick={() => go('adminReports')}>{openReports > 0 ? `Problem reports (${openReports} open)` : 'Problem reports'}</Button>}
+          {admin && <Button onClick={() => go('adminPayouts')}>Payouts to send</Button>}
+          {admin && <Button onClick={() => go('adminRefunds')}>{refunds > 0 ? `Refunds to send (${refunds})` : 'Refunds to send'}</Button>}
+          {admin && <Button onClick={() => go('adminBanks')}>{bankChecks > 0 ? `Bank checks (${bankChecks} waiting)` : 'Bank checks'}</Button>}
           <Button variant="soft" onClick={() => go('editContact')}>Contact details</Button>
           <Button variant="soft" onClick={() => go('notifications')}>{state.unread > 0 ? `Notifications (${state.unread} new)` : 'Notifications'}</Button>
           <Button variant="soft" onClick={() => jump('home')}>Browse photographers</Button>

@@ -1,5 +1,5 @@
 // Tests the Worker (src/worker.js) with a fake R2 bucket and a fake Supabase. Run: npm run test:worker
-import worker, { purgeExpired, sniffImage } from '../src/worker.js'
+import worker, { SECURITY_HEADERS, jwtPayload, purgeDocuments, purgeExpired, sniffImage } from '../src/worker.js'
 
 let pass = 0, fail = 0
 const ok = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : '  -> ' + extra}`) }
@@ -23,13 +23,21 @@ function fakeR2() {
 }
 
 // A fake Supabase: tokens -> users, and scripted answers for the database functions.
-let calls, dbAnswer
+let calls, dbAnswer, storageDeletes, storageFails = false
+const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+const jwt = (claims) => `${b64u({ alg: 'HS256' })}.${b64u(claims)}.sig`
+const ADMIN_MFA = jwt({ sub: U_PHOTOG, aal: 'aal2' })
+const STOLEN_CLAIMS = jwt({ sub: 'someone-else', aal: 'aal2' })   // a genuine token for U_PHOTOG is required; claims must match
 const realFetch = globalThis.fetch
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url)
   if (u.endsWith('/auth/v1/user')) {
     const t = (init.headers.authorization || '').replace('Bearer ', '')
-    return t === 'good-token' ? new Response(JSON.stringify({ id: U_PHOTOG }), { status: 200 }) : new Response('{}', { status: 401 })
+    return ['good-token', ADMIN_MFA, STOLEN_CLAIMS].includes(t) ? new Response(JSON.stringify({ id: U_PHOTOG }), { status: 200 }) : new Response('{}', { status: 401 })
+  }
+  if (u.includes('/storage/v1/object/verification-docs')) {
+    storageDeletes.push(JSON.parse(init.body).prefixes)
+    return new Response('[]', { status: storageFails ? 500 : 200 })
   }
   const name = u.split('/rpc/')[1]
   const args = JSON.parse(init.body || '{}')
@@ -54,11 +62,14 @@ const form = (file, preview, name = 'IMG_1.jpg') => {
 }
 const reset = () => {
   calls = []
+  storageDeletes = []
+  storageFails = false
   dbAnswer = {
     worker_register_photo: (a) => ({ id: a.p_photo, storage_path: `deliveries/${a.p_booking}/${a.p_photo}.full`, preview_path: `deliveries/${a.p_booking}/${a.p_photo}.preview`, file_name: a.p_name, size_bytes: a.p_size }),
     worker_remove_photo: { id: PHOTO, storage_path: `deliveries/${BOOKING}/${PHOTO}.full`, preview_path: `deliveries/${BOOKING}/${PHOTO}.preview` },
     worker_photo_key: `deliveries/${BOOKING}/${PHOTO}.full`,
     list_expired_galleries: [], mark_gallery_purged: null, purge_old_chats: 3,
+    list_expired_documents: [], mark_documents_deleted: (a) => a.p_ids.length,
   }
 }
 const err = (message, code) => Object.assign(new Error(message), { code })
@@ -156,6 +167,37 @@ reset(); env = mkEnv()
 dbAnswer.list_expired_galleries = err('boom')
 await worker.scheduled({}, env)
 ok('a failure clearing galleries does not stop the chat clean-up', calls.some((c) => c.name === 'purge_old_chats'))
+
+console.log('\n# Security')
+reset(); env = mkEnv()
+res = await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`), env)
+ok('API answers carry security headers', Object.entries(SECURITY_HEADERS).every(([k, v]) => res.headers.get(k) === v))
+res = await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`, { token: null }), env)
+ok('...even refusals', res.headers.get('x-frame-options') === 'DENY' && res.headers.get('x-content-type-options') === 'nosniff')
+reset(); env = mkEnv()
+env.DELIVERIES.store.set(fullKey, { body: JPEG, size: 1, httpMetadata: { contentType: 'image/jpeg' } })
+await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`), env)
+ok('a normal session is passed to the database as aal1', calls.find((c) => c.name === 'worker_photo_key').args.p_aal === 'aal1')
+reset(); env = mkEnv()
+await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`, { token: ADMIN_MFA }), env)
+ok('a two-step session is passed as aal2', calls.find((c) => c.name === 'worker_photo_key').args.p_aal === 'aal2')
+reset(); env = mkEnv()
+await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`, { token: STOLEN_CLAIMS }), env)
+ok('aal2 claims for a different person do not count', calls.find((c) => c.name === 'worker_photo_key').args.p_aal === 'aal1')
+ok('a broken token payload reads as empty', JSON.stringify(jwtPayload('not-a-jwt')) === '{}')
+ok('a token with spaces is refused', (await worker.fetch(req('GET', `/api/photos/${PHOTO}/full`, { token: 'good-token extra' }), mkEnv())).status === 401)
+
+console.log('\n# Deleting ID documents (POPIA)')
+reset(); env = mkEnv()
+ok('nothing due: nothing deleted', (await purgeDocuments(env)) === 0 && storageDeletes.length === 0)
+dbAnswer.list_expired_documents = [{ id: 'd1', storage_path: 'u1/sa_id_front.jpg' }, { id: 'd2', storage_path: 'u1/selfie.jpg' }]
+ok('due documents: the files are deleted, then the records', (await purgeDocuments(env)) === 2 && storageDeletes[0].join(',') === 'u1/sa_id_front.jpg,u1/selfie.jpg' && calls.some((c) => c.name === 'mark_documents_deleted' && c.args.p_ids.join(',') === 'd1,d2'))
+reset(); env = mkEnv(); storageFails = true
+dbAnswer.list_expired_documents = [{ id: 'd1', storage_path: 'u1/a.jpg' }]
+ok('if storage fails, the records are kept to try again tomorrow', (await purgeDocuments(env)) === 0 && !calls.some((c) => c.name === 'mark_documents_deleted'))
+reset(); env = mkEnv()
+await worker.scheduled({}, env)
+ok('the daily job also checks for documents to delete', calls.some((c) => c.name === 'list_expired_documents'))
 
 globalThis.fetch = realFetch
 console.log(`\n${pass} passed, ${fail} failed`)

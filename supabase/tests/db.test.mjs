@@ -29,6 +29,9 @@ for (const f of fs.readdirSync(dir).sort().filter((f) => !/storage/.test(f))) {
   await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'))
 }
 
+// The booking-abuse limits are tested in their own section; the rest of the suite books far more than a real person.
+await db.exec(`update platform_settings set max_bookings_per_hour = 100, max_unpaid_holds = 20`)
+
 process.on('unhandledRejection', (e) => { console.error('\nTEST CRASH:', e.message); process.exit(1) })
 
 /* ---- helpers ---- */
@@ -44,11 +47,13 @@ const raises = async (name, p, re) => {
 const su = (sql, p = []) => db.query(sql, p)
 const as = async (who, sql, p = []) => {
   await db.query(`select set_config('request.jwt.claim.sub', $1, false), set_config('request.jwt.claims', $2, false)`,
-    [who.id || '', JSON.stringify({ sub: who.id, role: who.role })])
+    [who.id || '', JSON.stringify({ sub: who.id, role: who.role, aal: who.aal || 'aal2' })])
   await db.exec(`set role ${who.role}`)
   try { return await db.query(sql, p) } finally { await db.exec('reset role') }
 }
 const user = (id) => ({ id, role: 'authenticated' })
+const STORE = 'https://proj.supabase.co/storage/v1/object/public'
+const sto = (bucket, owner, file) => `${STORE}/${bucket}/${owner}/${file}`
 const anon = { id: null, role: 'anon' }
 const svc = { id: null, role: 'service_role' }
 const dayPlus = async (n) => (await su(`select (current_date + $1::int)::text d`, [n])).rows[0].d
@@ -82,7 +87,7 @@ await as(user(p1), `update profiles set phone='+27821234567' where id=$1`, [p1])
 await raises('submit fails with too few photos', as(user(p1), `select * from submit_for_verification()`), /at least 5 portfolio photos/)
 for (let i = 0; i < 5; i++) {
   await as(user(p1), `insert into photos (photographer_id,url,is_portfolio,is_cover,upload_order) values ($1,$2,true,$3,$4)`,
-    [pid, `https://img.test/${i}.jpg`, i === 0, i])
+    [pid, sto('portfolio', p1, `${i}.jpg`), i === 0, i])
 }
 await raises('submit fails with too few packages', as(user(p1), `select * from submit_for_verification()`), /at least 3 packages/)
 const pk = {}
@@ -156,7 +161,8 @@ await raises('a gateway reference cannot be reused for another booking',
 eq('that booking stays unpaid', (await getB(bOther.id)).status, 'pending')
 await as(user(c2), `select * from cancel_booking($1,'')`, [bOther.id])
 eq('webhook retry is idempotent', (await su(`select count(*)::int n from payments where booking_id=$1`, [b1.id])).rows[0].n, 1)
-eq('client sees own payment', (await as(user(c1), `select * from payments`)).rows.length, 1)
+eq('a client cannot read raw payment records (they may hold gateway data)', (await as(user(c1), `select * from payments`)).rows.length, 0)
+eq('...an admin can', (await as(user(adminId), `select * from payments`)).rows.length >= 1, true)
 eq('photographer cannot see payment records', (await as(user(p1), `select * from payments`)).rows.length, 0)
 eq('other client cannot see the booking', (await as(user(c2), `select * from bookings where id=$1`, [b1.id])).rows.length, 0)
 eq('photographer sees the booking', (await as(user(p1), `select * from bookings where id=$1`, [b1.id])).rows.length, 1)
@@ -173,7 +179,7 @@ await raises('outsider cannot post in chat', as(user(c2), `insert into chat_mess
 await raises('cannot impersonate another sender', as(user(c1), `insert into chat_messages (booking_id,sender_id,content) values ($1,$2,'hi')`, [b1.id, p1]), /row-level security/)
 await raises('client cannot forge system messages', as(user(c1), `insert into chat_messages (booking_id,sender_id,message_type,content) values ($1,null,'system','Payment released')`, [b1.id]), /row-level security/)
 await raises('client cannot send proofs', as(user(c1), `insert into chat_messages (booking_id,sender_id,message_type,content,is_watermarked) values ($1,$2,'proof','x',true)`, [b1.id, c1]), /row-level security/)
-await as(user(p1), `insert into chat_messages (booking_id,sender_id,message_type,content,is_watermarked,image_url) values ($1,$2,'proof','Preview 01',true,'https://img.test/proof.jpg')`, [b1.id, p1])
+await as(user(p1), `insert into chat_messages (booking_id,sender_id,message_type,content,is_watermarked,image_url) values ($1,$2,'proof','Preview 01',true,$3)`, [b1.id, p1, sto('portfolio', p1, 'proof.jpg')])
 eq('photographer can share proofs', (await as(user(c1), `select * from chat_messages where message_type='proof'`)).rows.length, 1)
 
 console.log('\n# Tier 1 payout: 30% after the shoot, the rest after delivery')
@@ -189,7 +195,7 @@ eq('partially released', b1dep.payment_status, 'partially_released')
 eq('Tier 1 deposit payout = 30% of net', (await payouts(b1.id)).map((p) => p.amount).join(','), '1216.05')
 eq('cron is idempotent', (await as(svc, `select process_due_payouts() n`)).rows[0].n, 0)
 await raises('cannot deliver without photos', as(user(p1), `select * from deliver_gallery($1)`, [b1.id]), /upload all 100 edited photos/)
-for (let i = 0; i < 5; i++) await as(user(p1), `insert into photos (photographer_id,booking_id,url,is_proof) values ($1,$2,'https://img.test/proof.jpg',true)`, [pid, b1.id])
+for (let i = 0; i < 5; i++) await as(user(p1), `insert into photos (photographer_id,booking_id,url,is_proof) values ($1,$2,$3,true)`, [pid, b1.id, sto('portfolio', p1, 'proof.jpg')])
 await addFinals(b1.id, 99)
 await raises('proofs do not count: 99 of 100 is not enough', as(user(p1), `select * from deliver_gallery($1)`, [b1.id]), /you have 99/)
 eq('client can see booking photos', (await as(user(c1), `select * from photos where booking_id=$1`, [b1.id])).rows.length > 0, true)
@@ -219,7 +225,9 @@ await raises('stranger cannot review', as(user(c2), `select * from submit_review
 await as(user(c1), `select * from submit_review($1,5,'Amazing!')`, [b1.id])
 await raises('only one review per booking', as(user(c1), `select * from submit_review($1,4,'again')`, [b1.id]), /duplicate|unique/)
 await raises('rating must be 1-5', as(user(c1), `select * from submit_review($1,9,'x')`, [b1.id]), /check|not allowed|complete/)
-eq('anyone can read reviews', (await as(anon, `select * from reviews`)).rows.length, 1)
+eq('anyone can read reviews (rating and comment)', (await as(anon, `select id, rating, comment, created_at from reviews`)).rows.length, 1)
+await raises('...but not who wrote them', as(anon, `select client_id from reviews`), /permission denied/)
+await raises('...not even signed in', as(user(c2), `select booking_id from reviews`), /permission denied/)
 
 console.log('\n# Final payout after the 48h review window (client never responds)')
 const bAuto = await bookAndPay(c1, pk.Silver, 12)
@@ -440,12 +448,12 @@ const asP2 = (sql, params = []) => as(user(p2), sql, params)
 // step 1: profile
 await asP2(`update profiles set full_name=$1 where id=$2`, ['Lerato Nkosi', p2])
 await asP2(`update photographer_profiles set location=$1, specialties=$2, bio=$3 where id=$4`, ['Johannesburg', ['Matric', 'Events'], 'Bold colour, confident frames.', pid2])
-await asP2(`update profiles set profile_photo_url=$1 where id=$2`, ['https://x.test/avatar.jpg', p2])
+await asP2(`update profiles set profile_photo_url=$1 where id=$2`, [sto('avatars', p2, 'avatar.jpg'), p2])
 // step 2: portfolio (cover + order), then remove and reorder
 const ph = []
 for (let i = 0; i < 6; i++) {
   ph.push((await asP2(`insert into photos (photographer_id,url,thumbnail_url,storage_path,is_portfolio,is_cover,upload_order)
-                       values ($1,$2,$3,$4,true,$5,$6) returning id`, [pid2, `https://x.test/${i}.jpg`, `https://x.test/${i}-t.jpg`, `${p2}/${i}.jpg`, i === 0, i])).rows[0].id)
+                       values ($1,$2,$3,$4,true,$5,$6) returning id`, [pid2, sto('portfolio', p2, `${i}.jpg`), sto('portfolio', p2, `${i}-t.jpg`), `${p2}/${i}.jpg`, i === 0, i])).rows[0].id)
 }
 await asP2(`delete from photos where id=$1`, [ph[5]])
 await asP2(`update photos set upload_order=0, is_cover=true where id=$1`, [ph[1]])
@@ -518,7 +526,7 @@ eq('ID documents scheduled for deletion', (await su(`select count(*)::int n from
 const live2 = (await as(anon, `select full_name, from_price, cover_url, specialties from public_photographers where id=$1`, [pid2])).rows[0]
 eq('approved photographer appears in public search', live2.full_name, 'Lerato Nkosi')
 eq('public listing shows the cheapest package', live2.from_price, '1200.00')
-eq('public listing shows the cover photo', live2.cover_url, 'https://x.test/1.jpg')
+eq('public listing shows the cover photo', live2.cover_url, sto('portfolio', p2, '1.jpg'))
 eq('public listing shows specialties', live2.specialties.join(','), 'Matric,Events')
 eq('anon can now see the portfolio', (await as(anon, `select * from photos where photographer_id=$1 and is_portfolio`, [pid2])).rows.length, 5)
 eq('anon can now see the packages', (await as(anon, `select * from packages where photographer_id=$1`, [pid2])).rows.length, 3)
@@ -528,8 +536,8 @@ eq('bank details stay private after approval', (await as(anon, `select count(*):
 console.log('\n# Marketplace: listing, calendar, favourites and a real booking (as the app sends them)')
 const d1m = await dayPlus(40), d2m = await dayPlus(41), d3m = await dayPlus(42)
 const listed = (await as(anon, `select cover_thumb_url, cover_url from public_photographers where id=$1`, [pid2])).rows[0]
-eq('listing exposes a small cover thumbnail', listed.cover_thumb_url, 'https://x.test/1-t.jpg')
-eq('...and still the full-size cover', listed.cover_url, 'https://x.test/1.jpg')
+eq('listing exposes a small cover thumbnail', listed.cover_thumb_url, sto('portfolio', p2, '1-t.jpg'))
+eq('...and still the full-size cover', listed.cover_url, sto('portfolio', p2, '1.jpg'))
 
 // photographer opens days (single, bulk upsert re-sending an open day, and a delete)
 await asP2(`insert into availability (photographer_id,day,is_open) values ($1,$2,true) on conflict (photographer_id,day) do update set is_open=excluded.is_open`, [pid2, d1m])
@@ -817,7 +825,7 @@ await asP2(`select * from request_withdrawal()`)
 console.log('\n# Delivering real photos (Worker functions)')
 const reg = (who, booking, photo, size = 1000) => as(who, `select * from worker_register_photo($1,$2,$3,'IMG.jpg',$4)`, [who.uid, booking, photo, size])
 const wUser = (id) => ({ ...svc, uid: id })
-const key = (uid, photo, variant) => as(svc, `select worker_photo_key($1,$2,$3) k`, [uid, photo, variant]).then((r) => r.rows[0].k)
+const key = (uid, photo, variant, aal = 'aal1') => as(svc, `select worker_photo_key($1,$2,$3,$4) k`, [uid, photo, variant, aal]).then((r) => r.rows[0].k)
 const dlv = await pastShoot(c1, pk2[0])           // package of 40 photos, shoot already started
 const fut = await (async () => {                  // a booking whose shoot has not started
   const d = await dayPlus(dn++)
@@ -827,7 +835,7 @@ const fut = await (async () => {                  // a booking whose shoot has n
   return x.id
 })()
 await raises('normal users cannot call the Worker functions', as(user(p2), `select * from worker_register_photo($1,$2,$3,'a.jpg',10)`, [p2, dlv, randomUUID()]), /permission denied/)
-await raises('...not even to look up a file key', as(user(c1), `select worker_photo_key($1,$2,'full')`, [c1, randomUUID()]), /permission denied/)
+await raises('...not even to look up a file key', as(user(c1), `select worker_photo_key($1,$2,'full','aal2')`, [c1, randomUUID()]), /permission denied/)
 await raises('a photographer cannot insert a delivery photo directly', asP2(`insert into photos (photographer_id,booking_id,url,is_proof) values ($1,$2,'https://x/y.jpg',false)`, [pid2, dlv]), /row-level security/)
 await raises('a stranger cannot register a photo', reg(wUser(p1), dlv, randomUUID()), /not allowed/)
 await raises('the client cannot register a photo', reg(wUser(c1), dlv, randomUUID()), /not allowed/)
@@ -854,7 +862,8 @@ await raises('nothing can be removed after delivery', as(svc, `select * from wor
 eq('the client can look at a preview', await key(c1, last, 'preview'), `deliveries/${dlv}/${last}.preview`)
 await raises('...but not the full-size file before approving', key(c1, last, 'full'), /unlock when you approve/)
 await raises('another client sees nothing', key(c2, last, 'preview'), /not allowed/)
-eq('an admin can fetch it', await key(adminId, last, 'full'), `deliveries/${dlv}/${last}.full`)
+await raises('an admin without two-step sign-in cannot fetch client photos', key(adminId, last, 'full'), /not allowed/)
+eq('an admin with two-step sign-in can fetch it', await key(adminId, last, 'full', 'aal2'), `deliveries/${dlv}/${last}.full`)
 await raises('an unknown variant is refused', key(c1, last, 'original'), /unknown variant/)
 await as(user(c1), `select * from approve_gallery($1)`, [dlv])
 eq('after approving the client gets the full-size file', await key(c1, last, 'full'), `deliveries/${dlv}/${last}.full`)
@@ -1179,6 +1188,108 @@ console.log('\n# Phone numbers and contact details')
   await raises('a client without a phone cannot book', as(user(bad), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], d]), /add your phone number/)
   await as(user(bad), `update profiles set phone='0761234567' where id=$1`, [bad])
   eq('...once they add one, they can', (await as(user(bad), `select * from create_booking($1,$2,'10:00','','ozow','saver')`, [pk2[0], d])).rows.length, 1)
+}
+
+console.log('\n# Security hardening')
+{
+  const denied = /permission denied/
+  // visitors write nothing
+  for (const [t, cols, vals] of [['availability', 'photographer_id,day', `'${pid2}', current_date + 400`], ['packages', 'photographer_id,name,price_zar,duration_hours,num_photos,delivery_days', `'${pid2}','x',1,1,1,1`],
+    ['photos', 'photographer_id,url,is_portfolio', `'${pid2}','https://x/y.jpg',true`], ['chat_messages', 'booking_id,content', `gen_random_uuid(),'hi'`], ['favorites', 'client_id,photographer_id', `'${c1}','${pid2}'`]]) {
+    await raises(`visitors cannot insert into ${t}`, as(anon, `insert into ${t} (${cols}) values (${vals})`), denied)
+  }
+  await raises('visitors cannot update profiles', as(anon, `update profiles set full_name='x'`), denied)
+  await raises('visitors cannot change platform settings', as(anon, `update platform_settings set simulate_payments=false`), denied)
+  await raises('nobody can write to the public photographer list', as(user(p2), `update public_photographers set full_name='x'`), /permission denied|cannot update view/)
+  // nobody writes the money tables directly
+  await raises('a client cannot insert a booking directly', as(user(c1), `insert into bookings (client_id) values ($1)`, [c1]), denied)
+  await raises('...or change a booking', as(user(c1), `update bookings set status='completed' where client_id=$1`, [c1]), denied)
+  await raises('a photographer cannot create a payout', asP2(`insert into payouts (photographer_id,booking_id,amount,type) values ($1,gen_random_uuid(),100,'final_release')`, [pid2]), denied)
+  await raises('a photographer cannot edit a payout', asP2(`update payouts set amount=99999 where photographer_id=$1`, [pid2]), denied)
+  await raises('nobody can forge a review', as(user(c1), `insert into reviews (booking_id,client_id,photographer_id,rating) values (gen_random_uuid(),$1,$2,5)`, [c1, pid2]), denied)
+  await raises('chat messages cannot be edited', as(user(c1), `update chat_messages set content='changed' where sender_id=$1`, [c1]), denied)
+  await raises('...or deleted', as(user(c1), `delete from chat_messages where sender_id=$1`, [c1]), denied)
+  // helper functions are not callable
+  await raises('visitors cannot call internal helpers (my_photographer_id)', as(anon, `select my_photographer_id()`), denied)
+  await raises('...or can_see_contact', as(anon, `select can_see_contact($1)`, [p2]), denied)
+  await raises('nobody can call slot_conflicts directly', as(user(c1), `select slot_conflicts($1, now(), now() + interval '1 hour')`, [pid2]), denied)
+  await raises('nobody can call calc_amounts directly', as(user(c1), `select * from calc_amounts(100)`), denied)
+  eq('visitors can still see open days', (await as(anon, `select count(*)::int n from get_open_days($1, current_date, current_date + 30, 2)`, [pid2])).rows.length, 1)
+
+  // images must be our storage, in the owner's folder
+  await raises('a portfolio photo from another website is refused', asP2(`insert into photos (photographer_id,url,is_portfolio) values ($1,'https://evil.example/x.jpg',true)`, [pid2]), /uploaded through SnapshotZA/)
+  await raises('...or from another user\'s folder', asP2(`insert into photos (photographer_id,url,is_portfolio) values ($1,$2,true)`, [pid2, sto('portfolio', p1, 'x.jpg')]), /uploaded through SnapshotZA/)
+  await raises('...or a file path that climbs out of the folder', asP2(`insert into photos (photographer_id,url,is_portfolio) values ($1,$2,true)`, [pid2, `${STORE}/portfolio/${p2}/../${p1}/x.jpg`]), /uploaded through SnapshotZA/)
+  await raises('...or a javascript: link', asP2(`insert into photos (photographer_id,url,is_portfolio) values ($1,'javascript:alert(1)',true)`, [pid2]), /uploaded through SnapshotZA/)
+  await raises('...or a storage path in someone else\'s folder', asP2(`insert into photos (photographer_id,url,storage_path,is_portfolio) values ($1,$2,$3,true)`, [pid2, sto('portfolio', p2, 'ok.jpg'), `${p1}/ok.jpg`]), /uploaded through SnapshotZA/)
+  eq('a photo in their own folder is fine', (await asP2(`insert into photos (photographer_id,url,storage_path,is_portfolio,upload_order) values ($1,$2,$3,true,99) returning id`, [pid2, sto('portfolio', p2, 'ok.jpg'), `${p2}/ok.jpg`])).rows.length, 1)
+  await raises('a profile photo from another website is refused', as(user(c1), `update profiles set profile_photo_url='https://evil.example/me.jpg' where id=$1`, [c1]), /uploaded through SnapshotZA/)
+  eq('a profile photo in their own avatar folder is fine', (await as(user(c1), `update profiles set profile_photo_url=$1 where id=$2`, [sto('avatars', c1, 'me.jpg'), c1])).affectedRows, 1)
+  await raises('a chat picture from another website is refused', as(user(p1), `insert into chat_messages (booking_id,sender_id,message_type,content,image_url) values ((select id from bookings where photographer_id=$2 limit 1),$1,'proof','x','https://evil.example/x.jpg')`, [p1, pid]), /uploaded through SnapshotZA|row-level security/)
+  await raises('a website link must be https', asP2(`update photographer_profiles set website_url='javascript:alert(1)' where id=$1`, [pid2]), /pp_website_url/)
+  await raises('an instagram handle must look like one', asP2(`update photographer_profiles set instagram_handle='<script>' where id=$1`, [pid2]), /pp_instagram/)
+  await raises('a 5000-character bio is refused', asP2(`update photographer_profiles set bio=repeat('x', 5000) where id=$1`, [pid2]), /pp_bio_len/)
+  await raises('a 500-character name is refused', as(user(c1), `update profiles set full_name=repeat('x', 500) where id=$1`, [c1]), /profiles_name_len/)
+  await raises('a package price of R5 million is refused', asP2(`update packages set price_zar=5000000 where id=$1`, [pk2[0]]), /packages_price_range/)
+
+  // booking abuse limits
+  await su(`update platform_settings set max_bookings_per_hour = 10, max_unpaid_holds = 3`)
+  const spammer = await mkUser('spammer@test.za', 'client', 'Spam Account')
+  const days = []
+  for (let i = 0; i < 12; i++) { const d = await dayPlus(dn++); await asP2(`insert into availability (photographer_id,day) values ($1,$2)`, [pid2, d]); days.push(d) }
+  const holds = []
+  for (let i = 0; i < 3; i++) holds.push((await book(user(spammer), pk2[0], days[i], '10:00')).rows[0].id)
+  await raises('a 4th unpaid reservation is refused', book(user(spammer), pk2[0], days[3], '10:00'), /already have 3 unpaid reservations/)
+  await as(user(spammer), `select * from cancel_booking($1,'')`, [holds[0]])
+  eq('...cancelling one frees a place', (await book(user(spammer), pk2[0], days[3], '10:00')).rows.length, 1)
+  // the hourly limit counts every reservation made, even ones cancelled straight away
+  await su(`update bookings set status='cancelled' where client_id=$1`, [spammer])
+  const made = (await su(`select count(*)::int n from bookings where client_id=$1`, [spammer])).rows[0].n
+  for (let i = made; i < 10; i++) {
+    const x = (await book(user(spammer), pk2[0], days[5], '10:00')).rows[0]
+    await as(user(spammer), `select * from cancel_booking($1,'')`, [x.id])
+  }
+  await raises('more than 10 reservations in an hour is refused', book(user(spammer), pk2[0], days[10], '10:00'), /too many reservations/)
+  await su(`update bookings set created_at = now() - interval '2 hours' where client_id=$1`, [spammer])
+  eq('...an hour later it is fine again', (await book(user(spammer), pk2[0], days[10], '10:00')).rows.length, 1)
+  await su(`update platform_settings set max_bookings_per_hour = 100, max_unpaid_holds = 20`)
+
+  // admins need two-step sign-in
+  const adminAal1 = { id: adminId, role: 'authenticated', aal: 'aal1' }
+  await raises('an admin without two-step sign-in has no admin powers', as(adminAal1, `select admin_verify_bank($1)`, [pid2]), /admins only/)
+  await raises('...cannot decide reports', as(adminAal1, `select * from admin_resolve_dispute(gen_random_uuid(),'dismiss','x')`), /admins only/)
+  eq('...cannot read bank details', (await as(adminAal1, `select * from payout_accounts`)).rows.length, 0)
+  eq('...cannot read ID documents', (await as(adminAal1, `select * from verification_documents`)).rows.length, 0)
+  eq('...cannot read other people\'s bookings', (await as(adminAal1, `select * from bookings where client_id <> $1`, [adminId])).rows.length, 0)
+  eq('with two-step sign-in the admin can', (await as(user(adminId), `select * from payout_accounts`)).rows.length >= 1, true)
+  await raises('a client claiming two-step sign-in is still not an admin', as({ id: c1, role: 'authenticated', aal: 'aal2' }, `select admin_verify_bank($1)`, [pid2]), /admins only/)
+
+  // security notices
+  const bankNotes = async () => (await su(`select count(*)::int n from notifications where user_id=$1 and type='security' and title like '%bank details were changed%' and body like '%ending 2222%'`, [p2])).rows[0].n
+  const before = await bankNotes()
+  await asP2(`update payout_accounts set account_number='62011112222' where photographer_id=$1`, [pid2])
+  eq('changing bank details tells the photographer (with the last 4 digits)', (await bankNotes()) - before, 1)
+  await asP2(`update payout_accounts set account_type=account_type where photographer_id=$1`, [pid2])
+  eq('...but saving without a real change does not', (await bankNotes()) - before, 1)
+  eq('...and the admins', (await su(`select count(*)::int n from notifications where user_id=$1 and type='security'`, [adminId])).rows[0].n >= 1, true)
+  eq('...and pauses withdrawals', (await su(`select bank_verified b from photographer_profiles where id=$1`, [pid2])).rows[0].b, false)
+  await as(user(adminId), `select admin_verify_bank($1)`, [pid2])
+  await as(user(c1), `update profiles set phone='0839990000' where id=$1`, [c1])
+  eq('changing a phone number tells the owner', (await su(`select count(*)::int n from notifications where user_id=$1 and type='security' and body like '%0839990000%'`, [c1])).rows[0].n, 1)
+
+  // POPIA: ID documents are deleted after review
+  const docs = (await su(`select id, storage_path, delete_after from verification_documents where photographer_id=$1`, [pid2])).rows
+  ok('approved photographers have a deletion date on their ID documents', docs.length > 0 && docs.every((d) => d.delete_after), JSON.stringify(docs.length))
+  await asP2(`update verification_documents set delete_after = null where photographer_id=$1`, [pid2])
+  eq('a photographer cannot postpone the deletion', (await su(`select count(*)::int n from verification_documents where photographer_id=$1 and delete_after is null`, [pid2])).rows[0].n, 0)
+  await raises('a document row cannot point at someone else\'s file', asP2(`update verification_documents set storage_path=$2 where photographer_id=$1`, [pid2, `${p1}/selfie.jpg`]), /uploaded through SnapshotZA/)
+  eq('nothing is due yet', (await as(svc, `select * from list_expired_documents() where storage_path like $1`, [`${p2}/%`])).rows.length, 0)
+  await su(`update verification_documents set delete_after = now() - interval '1 minute' where photographer_id=$1`, [pid2])
+  const due = (await as(svc, `select * from list_expired_documents() where storage_path like $1`, [`${p2}/%`])).rows
+  eq('after 7 days they are listed for deletion', due.length, docs.length)
+  await raises('users cannot list them', as(user(p2), `select * from list_expired_documents()`), denied)
+  await raises('...or delete records', as(user(p2), `select mark_documents_deleted($1)`, [due.map((d) => d.id)]), denied)
+  eq('the daily job removes the records once the files are gone', (await as(svc, `select mark_documents_deleted($1) n`, [due.map((d) => d.id)])).rows[0].n, docs.length)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

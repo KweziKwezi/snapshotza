@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, supabaseConfigured } from './lib/supabase.js'
-import { loadAccount, signOut as apiSignOut } from './lib/auth.js'
+import { loadAccount, mfaStatus, signOut as apiSignOut } from './lib/auth.js'
 import { loadStudio, studioState } from './lib/studio.js'
 import { chatUnread, getTestMode, unreadCount } from './lib/market.js'
 
@@ -82,7 +82,9 @@ export function AppProvider({ children, start = 'splash' }) {
       setState((s) => ({ ...s, ...studioState(res.profile, res.photographer, data) }))
       hydratedFor.current = user.id
     }
-    setAuth({ status: 'in', user, profile: res.profile || null, photographer: res.photographer || null })
+    // Admins: is this session verified with an authenticator app? (Admin powers need it.)
+    const mfa = res.profile?.role === 'admin' ? await mfaStatus().catch(() => ({ level: 'aal1', factors: [] })) : { level: 'aal1', factors: [] }
+    setAuth({ status: 'in', user, profile: res.profile || null, photographer: res.photographer || null, aal: mfa.level, mfaFactors: mfa.factors })
   }, [])
 
   // Is the platform in TEST MODE? Public setting; if it can't be read we assume real mode (safe default).

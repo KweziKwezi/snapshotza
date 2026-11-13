@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../store.jsx'
 import * as api from '../lib/studio.js'
+import { startAuthenticator, verifyAuthenticator } from '../lib/auth.js'
 import * as market from '../lib/market.js'
 import { ago } from './Notifications.jsx'
 import { MIN_PORTFOLIO_PHOTOS, money } from '../data.js'
@@ -9,17 +10,82 @@ import { Button, H1, Icon, Notice, Photo, Screen, TopBar, inputCls } from '../ui
 const DOC_LABEL = { sa_id_front: 'ID — front', sa_id_back: 'ID — back', passport: 'Passport', selfie: 'Selfie' }
 const norm = (s = '') => s.toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim()
 
-/** Admins only. The database enforces this too (row level security), so a non-admin simply sees nothing. */
+/** Admins only, and only in a session verified with an authenticator app. The database enforces both (row level
+ *  security and is_admin()), so without them a screen simply sees nothing. */
 function useAdminGuard() {
   const { auth } = useApp()
-  return auth.status === 'in' && auth.profile?.role === 'admin'
+  return auth.status === 'in' && auth.profile?.role === 'admin' && auth.aal === 'aal2'
 }
 function NotAdmin() {
-  const { jump } = useApp()
+  const { auth, jump } = useApp()
+  if (auth.status === 'in' && auth.profile?.role === 'admin') return <Screen><div className="px-5 pt-6"><AdminTwoStep /></div></Screen>
   return (
     <Screen footer={<Button variant="soft" arrow={false} onClick={() => jump('home')}>Go home</Button>}>
       <div className="px-5 pt-8"><H1>Admins only.</H1><p className="mt-2 text-[14px] text-neutral-600">You need an admin account to see this page.</p></div>
     </Screen>
+  )
+}
+
+/* ---------- Two-step sign-in for admins (authenticator app) ---------- */
+export function AdminTwoStep() {
+  const { auth, refreshAccount } = useApp()
+  const hasApp = (auth.mfaFactors || []).length > 0
+  const [setup, setSetup] = useState(null)   // { id, qr, secret } while adding an app
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [showSecret, setShowSecret] = useState(false)
+  if (auth.aal === 'aal2') {
+    return <Notice icon={<Icon.Shield size={18} />} title="Two-step sign-in is on">This session is verified with your authenticator app, so admin tools are unlocked.</Notice>
+  }
+  const begin = async () => {
+    setBusy(true); setError('')
+    const res = await startAuthenticator()
+    setBusy(false)
+    res.error ? setError(res.error) : setSetup(res)
+  }
+  const check = async () => {
+    const factorId = setup ? setup.id : auth.mfaFactors[0].id
+    setBusy(true); setError('')
+    const res = await verifyAuthenticator(factorId, code)
+    if (res.error) { setBusy(false); return setError(res.error) }
+    await refreshAccount(auth.user, { force: true })
+    setBusy(false)
+  }
+  const codeOk = /^\d{6}$/.test(code.replace(/\D/g, ''))
+  return (
+    <div className="rounded-2xl border border-line p-5" data-testid="admin-two-step">
+      <div className="flex items-center gap-2 text-[15px] font-semibold"><Icon.Shield size={18} /> {hasApp ? 'Enter your sign-in code' : 'Turn on two-step sign-in'}</div>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-600">
+        {hasApp
+          ? 'Open your authenticator app and type the 6-digit code for SnapshotZA. Admin tools unlock for this session.'
+          : 'Admin tools can approve photographers, check bank details and release money, so they need a second step: a code from an authenticator app (Google Authenticator, Microsoft Authenticator or similar) on your phone.'}
+      </p>
+      {!hasApp && !setup && <div className="mt-4"><Button disabled={busy} onClick={begin}>{busy ? 'Starting…' : 'Set up my authenticator app'}</Button></div>}
+      {setup && (
+        <div className="mt-4 flex flex-wrap items-start gap-5">
+          <img src={setup.qr} alt="QR code to scan with your authenticator app" className="h-44 w-44 rounded-xl border border-line bg-white p-2" />
+          <div className="min-w-0 flex-1 text-[13px] text-neutral-600">
+            <p><b>1.</b> In your authenticator app, add an account and scan this code.</p>
+            <button onClick={() => setShowSecret((v) => !v)} className="mt-1 font-semibold text-link">{showSecret ? 'Hide' : "Can't scan? Type a key instead"}</button>
+            {showSecret && <p className="mt-1 break-all rounded-lg bg-surface p-2 font-mono text-[12px]" data-testid="totp-secret">{setup.secret}</p>}
+            <p className="mt-3"><b>2.</b> Type the 6-digit code it shows.</p>
+          </div>
+        </div>
+      )}
+      {(hasApp || setup) && (
+        <div className="mt-4 flex items-end gap-3">
+          <label className="block flex-1">
+            <span className="mb-1.5 block text-xs text-neutral-500">6-digit code</span>
+            <input value={code} onChange={(e) => setCode(e.target.value.replace(/[^\d ]/g, '').slice(0, 7))} onKeyDown={(e) => e.key === 'Enter' && codeOk && !busy && check()}
+              inputMode="numeric" autoComplete="one-time-code" placeholder="123 456" aria-label="6-digit code" className={`${inputCls} tracking-[0.3em]`} />
+          </label>
+          <div className="w-40"><Button arrow={false} disabled={!codeOk || busy} onClick={check}>{busy ? 'Checking…' : 'Verify'}</Button></div>
+        </div>
+      )}
+      {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-700">{error}</p>}
+      {hasApp && <p className="mt-3 text-[12px] text-neutral-500">Lost your phone? The owner can remove the app from your account in Supabase (Authentication, Users), then you can set it up again.</p>}
+    </div>
   )
 }
 

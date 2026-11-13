@@ -8,7 +8,7 @@ const friendly = (msg = '') => {
   if (m.includes('email not confirmed')) return 'Please confirm your email first. Check your inbox (and spam).'
   if (m.includes('rate limit') || m.includes('too many')) return 'Too many attempts. Please wait a few minutes and try again.'
   if (m.includes('password') && m.includes('characters')) return 'Your password must be at least 8 characters.'
-  if (m.includes('already registered')) return 'That email already has an account. Try signing in.'
+  if (m.includes('already registered')) return 'We could not create that account. If you already have one, sign in instead.'
   return msg || 'Something went wrong. Please try again.'
 }
 
@@ -21,10 +21,9 @@ export async function signUp({ email, password, fullName, phone, role }) {
     options: { data: { full_name: fullName.trim(), phone, role }, emailRedirectTo: window.location.origin },
   })
   if (error) return { error: friendly(error.message) }
-  // Supabase hides whether an email exists: a repeat sign-up returns a user with no identities.
-  if (data.user && data.user.identities && data.user.identities.length === 0) {
-    return { error: 'That email already has an account. Try signing in.' }
-  }
+  // A repeat sign-up returns a user with no identities. We answer exactly as for a new address, so nobody can use
+  // this form to find out whether someone has an account.
+  if (data.user && data.user.identities && data.user.identities.length === 0) return { needsConfirm: true }
   return { needsConfirm: !data.session }
 }
 
@@ -86,4 +85,31 @@ export async function changeEmail(newEmail) {
   const { data, error } = await supabase.auth.updateUser({ email: newEmail.trim() }, { emailRedirectTo: window.location.origin })
   if (error) return { error: contactFriendly(error.message) }
   return { pending: data.user?.new_email || newEmail.trim() }
+}
+
+/* ------------------------------------------------- two-step sign-in (admins) */
+// Admin powers only work in a session verified with an authenticator app (the database checks this too).
+const mfaFriendly = (msg = '') => {
+  const m = msg.toLowerCase()
+  if (m.includes('invalid') || m.includes('code')) return 'That code is not right. Check the time on your phone and try the newest code.'
+  return friendly(msg)
+}
+/** { level: 'aal1' | 'aal2', factors: verified authenticator apps } */
+export async function mfaStatus() {
+  if (!supabaseConfigured) return { level: 'aal1', factors: [] }
+  const [aal, list] = await Promise.all([supabase.auth.mfa.getAuthenticatorAssuranceLevel(), supabase.auth.mfa.listFactors()])
+  return { level: aal.data?.currentLevel || 'aal1', factors: list.data?.totp || [] }
+}
+/** Starts adding an authenticator app: returns { id, qr, secret } to show. Unfinished earlier attempts are cleared. */
+export async function startAuthenticator() {
+  const list = await supabase.auth.mfa.listFactors()
+  for (const f of list.data?.all || []) if (f.status === 'unverified') await supabase.auth.mfa.unenroll({ factorId: f.id })
+  const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: `SnapshotZA admin ${new Date().toISOString().slice(0, 16)}` })
+  if (error) return { error: mfaFriendly(error.message) }
+  return { id: data.id, qr: data.totp.qr_code, secret: data.totp.secret }
+}
+/** Checks a 6-digit code from the authenticator app; on success this session gets admin powers. */
+export async function verifyAuthenticator(factorId, code) {
+  const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: String(code).replace(/\D/g, '') })
+  return error ? { error: mfaFriendly(error.message) } : {}
 }

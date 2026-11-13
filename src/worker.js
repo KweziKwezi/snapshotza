@@ -3,7 +3,8 @@
 //   POST   /api/deliveries/:bookingId     photographer uploads one edited photo (multipart: file, preview)
 //   DELETE /api/photos/:photoId           photographer removes a photo before delivering
 //   GET    /api/photos/:photoId/:variant  preview | full  (add ?download=1 to save it as a file)
-//   cron (daily)                          deletes galleries whose download period has ended, and chats older than 20 days
+//   cron (daily)                          deletes galleries whose download period has ended, chats older than 20 days,
+//                                         and ID documents 7 days after review (POPIA)
 //
 // The browser proves who it is with its Supabase sign-in token. The database decides what that person may do
 // (supabase/migrations/0010); this file only moves bytes. Everything else is served from the built app.
@@ -13,8 +14,17 @@
 const MAX_FILE = 50 * 1024 * 1024
 const MAX_PREVIEW = 5 * 1024 * 1024
 
+// Sent with every API answer (the built app gets the same protection from public/_headers).
+export const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  'cross-origin-resource-policy': 'same-origin',
+}
 const json = (status, body, headers = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } })
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY_HEADERS, ...headers } })
 
 /** Looks at the first bytes, not at what the browser claims the file is. */
 export function sniffImage(bytes) {
@@ -25,13 +35,26 @@ export function sniffImage(bytes) {
   return null
 }
 
+/** Reads a JWT's payload. Only used AFTER Supabase has confirmed the token is genuine (see whoIs). */
+export function jwtPayload(token) {
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(part + '='.repeat((4 - (part.length % 4)) % 4)))
+  } catch {
+    return {}
+  }
+}
+
+/** Who is asking: Supabase checks the sign-in token. Returns { id, aal } or null. */
 async function whoIs(request, env) {
-  const m = /^Bearer\s+(.+)$/i.exec(request.headers.get('authorization') || '')
+  const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') || '')
   if (!m) return null
   const res = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${m[1]}` } })
   if (!res.ok) return null
   const u = await res.json()
-  return u && u.id ? u.id : null
+  if (!u || !u.id) return null
+  const claims = jwtPayload(m[1])
+  return { id: u.id, aal: claims.sub === u.id && claims.aal === 'aal2' ? 'aal2' : 'aal1' }
 }
 
 /** Calls a database function as the service role. Throws {status, message} with the database's own plain-language message. */
@@ -95,14 +118,15 @@ async function remove(env, photoId, userId) {
   } catch (e) { return failure(e) }
 }
 
-async function serve(env, photoId, variant, userId, download) {
+async function serve(env, photoId, variant, userId, download, aal) {
   let k
   try {
-    k = await rpc(env, 'worker_photo_key', { p_user: userId, p_photo: photoId, p_variant: variant })
+    k = await rpc(env, 'worker_photo_key', { p_user: userId, p_photo: photoId, p_variant: variant, p_aal: aal })
   } catch (e) { return failure(e) }
   const obj = await env.DELIVERIES.get(k)
   if (!obj) return json(404, { error: 'That photo is no longer available.' })
   const headers = new Headers({
+    ...SECURITY_HEADERS,
     'content-type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream',
     'cache-control': variant === 'preview' ? 'private, max-age=3600' : 'private, no-store',
     'x-content-type-options': 'nosniff',
@@ -110,6 +134,19 @@ async function serve(env, photoId, variant, userId, download) {
   if (obj.size != null) headers.set('content-length', String(obj.size))
   if (download) headers.set('content-disposition', `attachment; filename="${photoId}.${variant === 'full' ? 'jpg' : 'preview.jpg'}"`)
   return new Response(obj.body, { status: 200, headers })
+}
+
+/** POPIA: deletes ID documents 7 days after review (files first, then the database rows). Returns how many. */
+export async function purgeDocuments(env) {
+  const due = (await rpc(env, 'list_expired_documents', {})) || []
+  if (!due.length) return 0
+  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/verification-docs`, {
+    method: 'DELETE',
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ prefixes: due.map((d) => d.storage_path) }),
+  })
+  if (!res.ok) return 0                      // try again tomorrow; never forget a file that still exists
+  return (await rpc(env, 'mark_documents_deleted', { p_ids: due.map((d) => d.id) })) || 0
 }
 
 /** Deletes every file of galleries whose download period is over, then tells the database. Returns how many galleries were cleared. */
@@ -138,14 +175,15 @@ export default {
     if (!env.DELIVERIES || !env.SUPABASE_SERVICE_KEY || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
       return json(503, { error: 'Photo storage is not set up yet.' })
     }
-    const userId = await whoIs(request, env)
-    if (!userId) return json(401, { error: 'Please sign in again.' })
+    const who = await whoIs(request, env)
+    if (!who) return json(401, { error: 'Please sign in again.' })
+    const userId = who.id
 
     let m
     if (request.method === 'POST' && (m = /^\/api\/deliveries\/([0-9a-f-]{36})$/.exec(url.pathname))) return upload(request, env, m[1], userId)
     if (request.method === 'DELETE' && (m = /^\/api\/photos\/([0-9a-f-]{36})$/.exec(url.pathname))) return remove(env, m[1], userId)
     if (request.method === 'GET' && (m = /^\/api\/photos\/([0-9a-f-]{36})\/(preview|full)$/.exec(url.pathname))) {
-      return serve(env, m[1], m[2], userId, url.searchParams.get('download') === '1')
+      return serve(env, m[1], m[2], userId, url.searchParams.get('download') === '1', who.aal)
     }
     return json(404, { error: 'Not found.' })
   },
@@ -155,5 +193,6 @@ export default {
     // Each job runs on its own, so a problem with one never stops the other.
     if (env.DELIVERIES) await purgeExpired(env).catch(() => {})
     await rpc(env, 'purge_old_chats', {}).catch(() => {})
+    await purgeDocuments(env).catch(() => {})
   },
 }

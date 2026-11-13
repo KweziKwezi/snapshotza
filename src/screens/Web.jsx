@@ -269,7 +269,7 @@ export function WebProfile() {
       <div className="mx-auto mt-4 grid max-w-7xl grid-cols-1 gap-8 px-4 md:px-8 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10">
         <div className="min-w-0">
           <Photo src={p.cover} tone={p.tone} label={p.cover ? undefined : initials(p.name)} className="h-[220px] rounded-3xl md:h-[340px]" />
-          <div className="mt-6 flex flex-wrap items-start gap-4 md:flex-nowrap md:gap-5">
+          <div className="mt-6 flex flex-col items-start gap-3 md:flex-row md:gap-5">
             <div className="-mt-14 rounded-full border-4 border-white"><Avatar person={p} size={96} /></div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-3">

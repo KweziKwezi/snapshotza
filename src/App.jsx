@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { AppProvider, useApp } from './store.jsx'
 import { Icon } from './ui.jsx'
-import { SiteHeader, WebAuth, WebBrowse, WebDashboard, WebDoc, WebFlow, WebInbox, WebOnboarding, WebProfile, useIsDesktop } from './screens/Web.jsx'
+import { SiteHeader, WebAuth, WebBrowse, WebDashboard, WebDoc, WebFlow, WebInbox, WebOnboarding, WebProfile, useIsInstalledApp } from './screens/Web.jsx'
 import { Landing } from './screens/Landing.jsx'
 import {
   Bookings, Chat, ChooseDate, Confirmed, Gateway, Home, PaymentMethod, Profile, Protection, Review, Splash,
@@ -120,7 +120,7 @@ function Booting() {
 
 function Shell() {
   const { screen, jump, auth, state } = useApp()
-  const isDesktop = useIsDesktop()
+  const isInstalledApp = useIsInstalledApp()
 
   // The app always starts on the welcome screen (page load, refresh, or the link in a confirmation email).
   // A signed-in person should never be left there: send them to their own home instead.
@@ -137,8 +137,8 @@ function Shell() {
         TEST MODE · payments and payouts are simulated
       </div>
     ) : null
-    // Computers get the website; phones (and tablets) get the app.
-    if (isDesktop && supabaseConfigured) return <WebShell Current={Current} screen={screen} banner={banner} booting={Current === Booting} />
+    // Browsers (any width) get the website; the installed app gets the app layout.
+    if (!isInstalledApp && supabaseConfigured) return <WebShell Current={Current} screen={screen} banner={banner} booting={Current === Booting} />
     return (
       <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-white md:shadow-[0_0_40px_rgba(0,0,0,0.12)]">
         {banner}

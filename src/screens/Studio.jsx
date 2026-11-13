@@ -7,7 +7,7 @@ import {
   BANKS, BOOKINGS_PER_TIER, MAX_TIER, MIN_PORTFOLIO_PHOTOS, SPECIALTIES, TIER_DEPOSIT_PCT, money, tierFor,
 } from '../data.js'
 import {
-  Button, Checkbox, Field, H1, Icon, Notice, NotificationBell, Photo, Screen, Segmented, Stepper, TopBar, inputCls,
+  Button, Checkbox, Field, H1, Icon, Notice, NotificationBell, Photo, Screen, Segmented, Stepper, TopBar, inputCls, useWeb,
 } from '../ui.jsx'
 
 const maskAcc = (n = '') => '•••• ' + n.slice(-4)
@@ -124,6 +124,7 @@ function StudioGate() {
 
 /* ---------- 8. Photographer dashboard ---------- */
 function Dashboard({ live }) {
+  const web = useWeb()
   const { go, jump, state, auth } = useApp()
   const [earn, setEarn] = useState(null)
   const [bookings, setBookings] = useState(null)
@@ -153,7 +154,7 @@ function Dashboard({ live }) {
       <div className="px-5 pt-3">
         <div className="flex items-start justify-between">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Photographer studio</div>
-          <NotificationBell className="lg:hidden" count={auth.status === 'in' ? state.unread : 0} onClick={() => (auth.status === 'in' ? go('notifications') : go('auth'))} />
+          <NotificationBell className={web ? 'hidden' : ''} count={auth.status === 'in' ? state.unread : 0} onClick={() => (auth.status === 'in' ? go('notifications') : go('auth'))} />
         </div>
         <H1 className="mt-1 text-[30px]">Morning, {first}.</H1>
         <p className="mt-1 text-[13px] text-neutral-500">Let’s make your next great shot happen.</p>
@@ -207,7 +208,7 @@ function Dashboard({ live }) {
         )}
 
         {live && (
-          <section className="mt-6 lg:hidden" aria-label="Manage your studio">
+          <section className={`mt-6 ${web ? 'hidden' : ''}`} aria-label="Manage your studio">
             <h2 className="font-display text-[18px] font-bold">Manage your studio</h2>
             <div className="mt-3 divide-y divide-white overflow-hidden rounded-2xl bg-surface">
               {[

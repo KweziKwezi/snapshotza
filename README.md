@@ -189,3 +189,6 @@ Same address, same accounts and data. The layout is chosen by screen size:
   - Sign in / create account: a split page with a brand panel; photographer onboarding: the five steps in a sidebar; policy: an article page.
   - The screens are shared with the app (same logic and rules); inside the website layouts they render as web pages (`WebContext` in `src/ui.jsx`).
 - Signed-out visitors see the landing page on both.
+
+## Security (migrations 16-17)
+Read **[SECURITY.md](SECURITY.md)**: the run order for migrations 15-17, how to set up the admin's two-step sign-in, the Supabase/Cloudflare dashboard checklist, and the step that switches test mode off before real money.
